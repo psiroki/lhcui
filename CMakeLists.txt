@@ -20,7 +20,7 @@ endif()
 option(HUI_ENABLE_KEYBOARD_FALLBACK "Enable keyboard fallback" ${FALLBACK_DEFAULT})
 
 # hui (static library)
-add_library(hui STATIC src/dummy.cpp)
+add_library(hui STATIC src/renderer/SDL1Renderer.cpp src/renderer/SDL2Renderer.cpp)
 
 target_include_directories(hui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(hui PRIVATE -Wall -Wextra)
@@ -31,6 +31,8 @@ if(HUI_USE_SDL1)
 else()
     pkg_check_modules(SDL REQUIRED sdl2 SDL2_ttf)
 endif()
+
+target_include_directories(hui PRIVATE ${SDL_INCLUDE_DIRS})
 
 if(HUI_ENABLE_KEYBOARD_FALLBACK)
     target_compile_definitions(hui PUBLIC HUI_ENABLE_KEYBOARD_FALLBACK)

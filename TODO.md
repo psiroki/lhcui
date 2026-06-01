@@ -53,39 +53,39 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 ## Phase 3 — Renderer Abstraction
 
-- [ ] Define the `IRenderer` pure-virtual interface in `include/hui/IRenderer.h` (§5.1)
-  - [ ] Frame lifecycle: `beginFrame()`, `endFrame()`
-  - [ ] Clip stack: `pushClip()`, `popClip()`
-  - [ ] Primitives: `fillRect()`, `drawRect()`, `drawLine()`
-  - [ ] Text: `drawText()`, `measureText()`, `drawTextEllipsis()`
-  - [ ] Textures: `loadTexture()`, `freeTexture()`, `textureSize()`, `drawTexture()`
-  - [ ] Alpha modulation: `setGlobalAlpha()`
-  - [ ] Query: `screenSize()`
-- [ ] Implement `SDL2Renderer` in `src/renderer/SDL2Renderer.cpp` (SDL2 + SDL2_ttf only; no SDL header leaks into headers) (§5.2)
-  - [ ] Internal `FontHandle` → `TTF_Font*` map; `TextureHandle` → `SDL_Texture*` map
-  - [ ] Clip stack emulated with `SDL_RenderSetClipRect` using intersected rects
-  - [ ] `drawTextEllipsis` with UTF-8-correct progressive truncation and per-string width cache (§13.1)
-  - [ ] `setGlobalAlpha` via `SDL_SetRenderDrawBlendMode` / `SDL_SetTextureAlphaMod`
-- [ ] Implement `SDL1Renderer` in `src/renderer/SDL1Renderer.cpp` (guarded by `HUI_USE_SDL1`) (§5.2)
-  - [ ] Clip stack via `SDL_SetClipRect` (intersected)
-  - [ ] `setGlobalAlpha` via pre-multiplied surface copy (not called every frame)
-  - [ ] Glyph surface cache: same string + font → reuse surface, do not re-render (§13.6)
-  - [ ] `drawTextEllipsis` with same UTF-8 truncation logic as SDL2 variant
-- [ ] Write a minimal renderer smoke-test in the example app: draw a filled rect, a border rect, and a line; confirm both backends render correctly
+- [x] Define the `IRenderer` pure-virtual interface in `include/hui/IRenderer.h` (§5.1)
+  - [x] Frame lifecycle: `beginFrame()`, `endFrame()`
+  - [x] Clip stack: `pushClip()`, `popClip()`
+  - [x] Primitives: `fillRect()`, `drawRect()`, `drawLine()`
+  - [x] Text: `drawText()`, `measureText()`, `drawTextEllipsis()`
+  - [x] Textures: `loadTexture()`, `freeTexture()`, `textureSize()`, `drawTexture()`
+  - [x] Alpha modulation: `setGlobalAlpha()`
+  - [x] Query: `screenSize()`
+- [x] Implement `SDL2Renderer` in `src/renderer/SDL2Renderer.cpp` (SDL2 + SDL2_ttf only; no SDL header leaks into headers) (§5.2)
+  - [x] Internal `FontHandle` → `TTF_Font*` map; `TextureHandle` → `SDL_Texture*` map
+  - [x] Clip stack emulated with `SDL_RenderSetClipRect` using intersected rects
+  - [x] `drawTextEllipsis` with UTF-8-correct progressive truncation and per-string width cache (§13.1)
+  - [x] `setGlobalAlpha` via `SDL_SetRenderDrawBlendMode` / `SDL_SetTextureAlphaMod`
+- [x] Implement `SDL1Renderer` in `src/renderer/SDL1Renderer.cpp` (guarded by `HUI_USE_SDL1`) (§5.2)
+  - [x] Clip stack via `SDL_SetClipRect` (intersected)
+  - [x] `setGlobalAlpha` via pre-multiplied surface copy (not called every frame)
+  - [x] Glyph surface cache: same string + font → reuse surface, do not re-render (§13.6)
+  - [x] `drawTextEllipsis` with same UTF-8 truncation logic as SDL2 variant
+- [x] Write a minimal renderer smoke-test in the example app: draw a filled rect, a border rect, and a line; confirm both backends render correctly
 
 ### ✅ QA Sign-off — Phase 3
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] Smoke-test scene (filled rect, border rect, line) renders correctly and identically in both SDL1 and SDL2 builds — capture screenshots and compare visually
-- [ ] `pushClip` / `popClip` correctly confines drawing: anything drawn outside the clip rect must not appear on screen
-- [ ] Nested clips (push A, push B, pop B, pop A) restore the outer clip region correctly
-- [ ] `drawTextEllipsis` with a string that fits within `maxWidth` renders the full string without a `…` suffix
-- [ ] `drawTextEllipsis` with a string that overflows renders a truncated string ending in `…` that fits within `maxWidth`
-- [ ] `drawTextEllipsis` handles a multi-byte UTF-8 character (e.g. `é`, `中`) without crashing or corrupting output
-- [ ] `setGlobalAlpha(0)` makes all subsequent draw calls invisible; `setGlobalAlpha(255)` restores full opacity
-- [ ] `loadTexture` with a non-existent path returns handle `0` (the null handle) and does not crash
-- [ ] No SDL header (`SDL.h`, `SDL2/SDL.h`, etc.) appears anywhere under `include/hui/` (grep check)
+- [x] Smoke-test scene (filled rect, border rect, line) renders correctly and identically in both SDL1 and SDL2 builds — capture screenshots and compare visually
+- [x] `pushClip` / `popClip` correctly confines drawing: anything drawn outside the clip rect must not appear on screen
+- [x] Nested clips (push A, push B, pop B, pop A) restore the outer clip region correctly
+- [x] `drawTextEllipsis` with a string that fits within `maxWidth` renders the full string without a `…` suffix
+- [x] `drawTextEllipsis` with a string that overflows renders a truncated string ending in `…` that fits within `maxWidth`
+- [x] `drawTextEllipsis` handles a multi-byte UTF-8 character (e.g. `é`, `中`) without crashing or corrupting output
+- [x] `setGlobalAlpha(0)` makes all subsequent draw calls invisible; `setGlobalAlpha(255)` restores full opacity
+- [x] `loadTexture` with a non-existent path returns handle `0` (the null handle) and does not crash
+- [x] No SDL header (`SDL.h`, `SDL2/SDL.h`, etc.) appears anywhere under `include/hui/` (grep check)
 
 ---
 
