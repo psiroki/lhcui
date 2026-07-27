@@ -91,57 +91,57 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 ## Phase 4 — Widget Base Class & Focus Manager
 
-- [ ] Implement `Widget` base class in `include/hui/Widget.h` (§6.1)
-  - [ ] `update(float dt)`, `draw()`, `onButtonDown()`, `onButtonUp()` virtuals
-  - [ ] `onFocus()`, `onBlur()` virtuals; `isFocused()`, `isDisabled()`, `setDisabled()` accessors
-  - [ ] Private `focused_` / `disabled_` fields; `setFocused()` befriended to `FocusManager`
-- [ ] Implement `FocusManager` in `include/hui/FocusManager.h` (§7.1)
-  - [ ] `setFocus(Widget*)`: calls `onBlur` on previous, `onFocus` on new
-  - [ ] `focused()`, `hasFocus()` accessors
-  - [ ] `forceOwner(Widget*)`: sets current without lifecycle callbacks (used by ViewStack on resume)
+- [x] Implement `Widget` base class in `include/hui/Widget.h` (§6.1)
+  - [x] `update(float dt)`, `draw()`, `onButtonDown()`, `onButtonUp()` virtuals
+  - [x] `onFocus()`, `onBlur()` virtuals; `isFocused()`, `isDisabled()`, `setDisabled()` accessors
+  - [x] Private `focused_` / `disabled_` fields; `setFocused()` befriended to `FocusManager`
+- [x] Implement `FocusManager` in `include/hui/FocusManager.h` (§7.1)
+  - [x] `setFocus(Widget*)`: calls `onBlur` on previous, `onFocus` on new
+  - [x] `focused()`, `hasFocus()` accessors
+  - [x] `forceOwner(Widget*)`: sets current without lifecycle callbacks (used by ViewStack on resume)
 
 ### ✅ QA Sign-off — Phase 4
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `setFocus(A)` followed by `setFocus(B)`: widget A receives exactly one `onBlur` call and widget B receives exactly one `onFocus` call
-- [ ] Calling `setFocus` on the widget that already has focus does not fire `onBlur` or `onFocus` a second time
-- [ ] `setFocus(nullptr)` calls `onBlur` on the current owner and leaves `focused()` returning `nullptr`
-- [ ] `forceOwner(W)` sets `focused()` to W without triggering `onBlur` or `onFocus` on any widget (instrument with a call counter)
-- [ ] `isFocused()` returns `true` only while the widget is the current owner; returns `false` after it is blurred
-- [ ] `setDisabled(true)` + `isDisabled()` round-trips correctly; `setDisabled(false)` restores the original state
+- [x] `setFocus(A)` followed by `setFocus(B)`: widget A receives exactly one `onBlur` call and widget B receives exactly one `onFocus` call
+- [x] Calling `setFocus` on the widget that already has focus does not fire `onBlur` or `onFocus` a second time
+- [x] `setFocus(nullptr)` calls `onBlur` on the current owner and leaves `focused()` returning `nullptr`
+- [x] `forceOwner(W)` sets `focused()` to W without triggering `onBlur` or `onFocus` on any widget (instrument with a call counter)
+- [x] `isFocused()` returns `true` only while the widget is the current owner; returns `false` after it is blurred
+- [x] `setDisabled(true)` + `isDisabled()` round-trips correctly; `setDisabled(false)` restores the original state
 
 ---
 
 ## Phase 5 — View System & View Stack
 
-- [ ] Implement `View` base class in `include/hui/View.h` (§8.1)
-  - [ ] Lifecycle hooks: `onPush()`, `onPop()`, `onResume()`, `onSuspend()`
-  - [ ] `update(float dt, FocusManager&)`, `draw(IRenderer&, const Theme&)` virtuals
-  - [ ] `onButtonDown()`, `onButtonUp()` virtuals returning `bool`
-  - [ ] `setDimmed()` / `isDimmed()` and `dimmed_` protected field
-  - [ ] `currentHints()` returning `std::vector<HintEntry>`
-  - [ ] `suspendFocus()` / `restoreFocus()` using `savedFocus_` pointer (§7.2)
-- [ ] Implement `ViewStack` in `src/ViewStack.cpp` (§8.2)
-  - [ ] `push()`: calls `onSuspend()` on previous top, then `onPush()` on new view; takes `unique_ptr` ownership
-  - [ ] `pop()`: calls `onPop()`, then `onResume()` on the view below; no-op on a single-entry stack
-  - [ ] `popTo<T>()` template: pops until the correct type is on top
-  - [ ] `replace()`: atomic pop+push
-  - [ ] `update()`: drives all views in the stack
-  - [ ] `draw()`: renders bottom-to-top; applies `setGlobalAlpha(128)` to all non-top views when stack depth > 1, restores to 255 before the top view (§8.2)
-  - [ ] `dispatchButtonDown()` / `dispatchButtonUp()`: routes to `top()` only
-- [ ] Provide optional `TransitionKind` enum and `SimpleTransition` helper struct (§8.4); not used by default `ViewStack`
+- [x] Implement `View` base class in `include/hui/View.h` (§8.1)
+  - [x] Lifecycle hooks: `onPush()`, `onPop()`, `onResume()`, `onSuspend()`
+  - [x] `update(float dt, FocusManager&)`, `draw(IRenderer&, const Theme&)` virtuals
+  - [x] `onButtonDown()`, `onButtonUp()` virtuals returning `bool`
+  - [x] `setDimmed()` / `isDimmed()` and `dimmed_` protected field
+  - [x] `currentHints()` returning `std::vector<HintEntry>`
+  - [x] `suspendFocus()` / `restoreFocus()` using `savedFocus_` pointer (§7.2)
+- [x] Implement `ViewStack` in `src/ViewStack.cpp` (§8.2)
+  - [x] `push()`: calls `onSuspend()` on previous top, then `onPush()` on new view; takes `unique_ptr` ownership
+  - [x] `pop()`: calls `onPop()`, then `onResume()` on the view below; no-op on a single-entry stack
+  - [x] `popTo<T>()` template: pops until the correct type is on top
+  - [x] `replace()`: atomic pop+push
+  - [x] `update()`: drives all views in the stack
+  - [x] `draw()`: renders bottom-to-top; applies `setGlobalAlpha(128)` to all non-top views when stack depth > 1, restores to 255 before the top view (§8.2)
+  - [x] `dispatchButtonDown()` / `dispatchButtonUp()`: routes to `top()` only
+- [x] Provide optional `TransitionKind` enum and `SimpleTransition` helper struct (§8.4); not used by default `ViewStack`
 
 ### ✅ QA Sign-off — Phase 5
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `push(B)` while A is on top: A's `onSuspend` fires before B's `onPush`; confirm call order with instrumented stubs
-- [ ] `pop()` while B is on top of A: B's `onPop` fires, then A's `onResume`; confirm call order
-- [ ] `pop()` on a stack with exactly one view is a no-op: the view is not removed and no lifecycle hook fires
-- [ ] `dispatchButtonDown` delivers the event only to the top view; a view below the top must not receive it (instrument both views)
-- [ ] With two views on the stack, the non-top view is drawn with dimming applied; the top view is drawn at full alpha
-- [ ] `suspendFocus()` records the focused widget; `restoreFocus()` returns focus to that exact widget via `forceOwner`
+- [x] `push(B)` while A is on top: A's `onSuspend` fires before B's `onPush`; confirm call order with instrumented stubs
+- [x] `pop()` while B is on top of A: B's `onPop` fires, then A's `onResume`; confirm call order
+- [x] `pop()` on a stack with exactly one view is a no-op: the view is not removed and no lifecycle hook fires
+- [x] `dispatchButtonDown` delivers the event only to the top view; a view below the top must not receive it (instrument both views)
+- [x] With two views on the stack, the non-top view is drawn with dimming applied; the top view is drawn at full alpha
+- [x] `suspendFocus()` records the focused widget; `restoreFocus()` returns focus to that exact widget via `forceOwner`
 
 ---
 
