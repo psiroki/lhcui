@@ -145,7 +145,7 @@ public:
             return true;
         }
         if (b == hui::Button::B) {
-            if (g_viewStack) g_viewStack->pop(&fm);
+            if (g_viewStack) g_viewStack->pop();
             return true;
         }
         if (focusIndex_ >= 0 && focusIndex_ < static_cast<int>(buttons_.size())) {
@@ -240,9 +240,9 @@ public:
         }
         if (b == hui::Button::B) {
             if (g_viewStack && g_viewStack->size() > 1) {
-                g_viewStack->pop(&fm);
+                g_viewStack->pop();
             } else if (g_viewStack) {
-                g_viewStack->replace(createMainMenuView(), &fm);
+                g_viewStack->replace(createMainMenuView());
             }
             return true;
         }
@@ -481,7 +481,7 @@ int main(int argc, char* argv[]) {
     example::g_running = true;
 
     // Push initial Base Screen
-    viewStack.push(example::createMainMenuView(), &focusManager);
+    viewStack.push(example::createMainMenuView());
 
     uint64_t lastTime = SDL_GetTicks();
 

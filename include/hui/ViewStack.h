@@ -65,27 +65,23 @@ public:
     FocusManager* focusManager() const { return fm_; }
 
     // Pushes a new view onto the stack.
-    // Calls onSuspend() (and suspendFocus if FocusManager is available) on previous top view.
-    // Takes unique_ptr ownership. Calls onPush() on the new view.
-    void push(std::unique_ptr<View> view, FocusManager* fm = nullptr);
+    // Previous top gets onSuspend(). New view gets onPush(). Takes ownership.
+    void push(std::unique_ptr<View> view);
 
     // Pops the top view off the stack.
-    // Calls onPop() on the removed view, then onResume() (and restoreFocus if FocusManager is available) on the view below.
-    // No-op if the stack has 1 or 0 entries.
-    void pop(FocusManager* fm = nullptr);
+    // It gets onPop(). The view below gets onResume(). No-op if stack depth <= 1.
+    void pop();
 
     // Pops views until a view of type T is at the top of the stack or only 1 view remains.
     template<typename T>
-    void popTo(FocusManager* fm = nullptr) {
-        FocusManager* activeFm = fm ? fm : fm_;
+    void popTo() {
         while (stack_.size() > 1 && !stack_.back()->template isType<T>()) {
-            pop(activeFm);
+            pop();
         }
     }
 
     // Replaces the current top view with a new view (atomic pop + push).
-    // Clears focus on current view, calls onPop() on the old top view and onPush() on the new view.
-    void replace(std::unique_ptr<View> view, FocusManager* fm = nullptr);
+    void replace(std::unique_ptr<View> view);
 
     // Returns pointer to the current top view, or nullptr if stack is empty.
     View* top() const {

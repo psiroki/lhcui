@@ -116,45 +116,45 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Tests covering Phase 5 QA sign-off checklist
+// Tests covering Phase 5 QA sign-off checklist & DESIGN.md §8.2 signatures
 // ---------------------------------------------------------------------------
 
 TEST_CASE("ViewStack — push call order (A onSuspend before B onPush)") {
     std::vector<std::string> log;
     FocusManager fm;
-    ViewStack stack;
+    ViewStack stack(&fm);
 
-    stack.push(std::make_unique<InstrumentedView>("A", &log), &fm);
+    stack.push(std::make_unique<InstrumentedView>("A", &log));
     CHECK(log == std::vector<std::string>{"A::onPush"});
 
     log.clear();
-    stack.push(std::make_unique<InstrumentedView>("B", &log), &fm);
+    stack.push(std::make_unique<InstrumentedView>("B", &log));
     CHECK(log == std::vector<std::string>{"A::onSuspend", "B::onPush"});
 }
 
 TEST_CASE("ViewStack — pop call order (B onPop before A onResume)") {
     std::vector<std::string> log;
     FocusManager fm;
-    ViewStack stack;
+    ViewStack stack(&fm);
 
-    stack.push(std::make_unique<InstrumentedView>("A", &log), &fm);
-    stack.push(std::make_unique<InstrumentedView>("B", &log), &fm);
+    stack.push(std::make_unique<InstrumentedView>("A", &log));
+    stack.push(std::make_unique<InstrumentedView>("B", &log));
 
     log.clear();
-    stack.pop(&fm);
+    stack.pop();
     CHECK(log == std::vector<std::string>{"B::onPop", "A::onResume"});
 }
 
 TEST_CASE("ViewStack — pop on single-entry stack is no-op") {
     std::vector<std::string> log;
     FocusManager fm;
-    ViewStack stack;
+    ViewStack stack(&fm);
 
-    stack.push(std::make_unique<InstrumentedView>("A", &log), &fm);
+    stack.push(std::make_unique<InstrumentedView>("A", &log));
     CHECK(stack.size() == 1);
 
     log.clear();
-    stack.pop(&fm);
+    stack.pop();
     CHECK(stack.size() == 1);
     CHECK(stack.top() != nullptr);
     CHECK(log.empty()); // No onPop or onResume fired
@@ -163,7 +163,7 @@ TEST_CASE("ViewStack — pop on single-entry stack is no-op") {
 TEST_CASE("ViewStack — dispatchButtonDown delivers event ONLY to top view") {
     std::vector<std::string> log;
     FocusManager fm;
-    ViewStack stack;
+    ViewStack stack(&fm);
 
     auto viewA = std::make_unique<InstrumentedView>("A", &log);
     auto viewB = std::make_unique<InstrumentedView>("B", &log);
@@ -171,8 +171,8 @@ TEST_CASE("ViewStack — dispatchButtonDown delivers event ONLY to top view") {
     InstrumentedView* ptrA = viewA.get();
     InstrumentedView* ptrB = viewB.get();
 
-    stack.push(std::move(viewA), &fm);
-    stack.push(std::move(viewB), &fm);
+    stack.push(std::move(viewA));
+    stack.push(std::move(viewB));
 
     bool consumed = stack.dispatchButtonDown(Button::A, fm);
     CHECK(consumed == false);
@@ -182,7 +182,7 @@ TEST_CASE("ViewStack — dispatchButtonDown delivers event ONLY to top view") {
 
 TEST_CASE("ViewStack — alpha dimming during draw()") {
     FocusManager fm;
-    ViewStack stack;
+    ViewStack stack(&fm);
 
     std::vector<std::string> log;
     auto viewA = std::make_unique<InstrumentedView>("A", &log);
@@ -191,8 +191,8 @@ TEST_CASE("ViewStack — alpha dimming during draw()") {
     InstrumentedView* ptrA = viewA.get();
     InstrumentedView* ptrB = viewB.get();
 
-    stack.push(std::move(viewA), &fm);
-    stack.push(std::move(viewB), &fm);
+    stack.push(std::move(viewA));
+    stack.push(std::move(viewB));
 
     MockRenderer renderer;
     Theme theme{};
@@ -208,38 +208,42 @@ TEST_CASE("ViewStack — alpha dimming during draw()") {
     CHECK(ptrB->alphaOnDraw == 255);
 }
 
-TEST_CASE("View — suspendFocus and restoreFocus via forceOwner") {
+TEST_CASE("View — suspendFocus and restoreFocus via forceOwner and widget isFocused invariant") {
     FocusManager fm;
     TestWidget widgetA;
     TestWidget widgetB;
 
-    ViewStack stack;
+    ViewStack stack(&fm);
     std::vector<std::string> log;
 
     // Push base View A
-    stack.push(std::make_unique<InstrumentedView>("A", &log), &fm);
+    stack.push(std::make_unique<InstrumentedView>("A", &log));
 
     // Focus widgetA on View A
     fm.setFocus(&widgetA);
-    CHECK(widgetA.isFocused());
+    CHECK(widgetA.isFocused() == true);
     CHECK(widgetA.focusCount == 1);
     CHECK(widgetA.blurCount == 0);
 
     // Push overlay View B -> this suspends View A, recording savedFocus_ = &widgetA
-    stack.push(std::make_unique<InstrumentedView>("B", &log), &fm);
+    stack.push(std::make_unique<InstrumentedView>("B", &log));
     CHECK(stack.top()->savedFocus() == nullptr); // View B has no saved focus yet
     CHECK(log.back() == "B::onPush");
 
     // Focus shifts to widgetB while overlay View B is active
     fm.setFocus(&widgetB);
-    CHECK(widgetB.isFocused());
+    CHECK(widgetB.isFocused() == true);
+    CHECK(widgetA.isFocused() == false);
     CHECK(widgetA.blurCount == 1);
 
     // Pop overlay View B -> View A resumes and restores focus to widgetA via forceOwner
-    stack.pop(&fm);
+    stack.pop();
 
     // Current focused widget is widgetA again
     CHECK(fm.focused() == &widgetA);
+
+    // State invariant assertion: widgetA.isFocused() must be true after forceOwner!
+    CHECK(widgetA.isFocused() == true);
 
     // forceOwner must NOT have triggered additional onFocus/onBlur callbacks on widgetA during restoreFocus!
     CHECK(widgetA.focusCount == 1);
@@ -248,16 +252,16 @@ TEST_CASE("View — suspendFocus and restoreFocus via forceOwner") {
 
 TEST_CASE("ViewStack — popTo<T>()") {
     FocusManager fm;
-    ViewStack stack;
+    ViewStack stack(&fm);
 
-    stack.push(std::make_unique<ViewTypeA>(), &fm);
-    stack.push(std::make_unique<ViewTypeB>(), &fm);
-    stack.push(std::make_unique<ViewTypeC>(), &fm);
+    stack.push(std::make_unique<ViewTypeA>());
+    stack.push(std::make_unique<ViewTypeB>());
+    stack.push(std::make_unique<ViewTypeC>());
 
     CHECK(stack.size() == 3);
     CHECK(stack.top()->isType<ViewTypeC>());
 
-    stack.popTo<ViewTypeA>(&fm);
+    stack.popTo<ViewTypeA>();
 
     CHECK(stack.size() == 1);
     CHECK(stack.top()->isType<ViewTypeA>());
@@ -266,12 +270,12 @@ TEST_CASE("ViewStack — popTo<T>()") {
 TEST_CASE("ViewStack — replace()") {
     std::vector<std::string> log;
     FocusManager fm;
-    ViewStack stack;
+    ViewStack stack(&fm);
 
-    stack.push(std::make_unique<InstrumentedView>("A", &log), &fm);
+    stack.push(std::make_unique<InstrumentedView>("A", &log));
     log.clear();
 
-    stack.replace(std::make_unique<InstrumentedView>("B", &log), &fm);
+    stack.replace(std::make_unique<InstrumentedView>("B", &log));
 
     CHECK(stack.size() == 1);
     CHECK(log == std::vector<std::string>{"A::onPop", "B::onPush"});

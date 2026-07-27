@@ -2,14 +2,13 @@
 
 namespace hui {
 
-void ViewStack::push(std::unique_ptr<View> view, FocusManager* fm) {
+void ViewStack::push(std::unique_ptr<View> view) {
     if (!view) return;
-    FocusManager* activeFm = fm ? fm : fm_;
 
     if (!stack_.empty()) {
         stack_.back()->onSuspend();
-        if (activeFm) {
-            stack_.back()->suspendFocus(*activeFm);
+        if (fm_) {
+            stack_.back()->suspendFocus(*fm_);
         }
     }
 
@@ -17,11 +16,10 @@ void ViewStack::push(std::unique_ptr<View> view, FocusManager* fm) {
     stack_.back()->onPush();
 }
 
-void ViewStack::pop(FocusManager* fm) {
+void ViewStack::pop() {
     if (stack_.size() <= 1) {
         return; // no-op on single-entry or empty stack
     }
-    FocusManager* activeFm = fm ? fm : fm_;
 
     std::unique_ptr<View> oldTop = std::move(stack_.back());
     stack_.pop_back();
@@ -29,22 +27,21 @@ void ViewStack::pop(FocusManager* fm) {
 
     View* newTop = stack_.back().get();
     newTop->onResume();
-    if (activeFm) {
-        newTop->restoreFocus(*activeFm);
+    if (fm_) {
+        newTop->restoreFocus(*fm_);
     }
 }
 
-void ViewStack::replace(std::unique_ptr<View> view, FocusManager* fm) {
+void ViewStack::replace(std::unique_ptr<View> view) {
     if (!view) return;
-    FocusManager* activeFm = fm ? fm : fm_;
 
     if (stack_.empty()) {
-        push(std::move(view), activeFm);
+        push(std::move(view));
         return;
     }
 
-    if (activeFm) {
-        activeFm->setFocus(nullptr);
+    if (fm_) {
+        fm_->setFocus(nullptr);
     }
 
     std::unique_ptr<View> oldTop = std::move(stack_.back());
