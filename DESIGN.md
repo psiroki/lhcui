@@ -1158,16 +1158,17 @@ uiSystem.setSuspended(true);
 
 While suspended:
 
-- **The first `draw()` clears to black and presents; every subsequent `draw()` is a no-op.**
+- **The first two `draw()` calls clear to black and present; every subsequent `draw()` is a no-op.**
+  To account for hardware double-buffering (where front and back framebuffers flip on present), clearing to black across the first two consecutive `draw()` frames ensures both buffers are cleared to black, eliminating screen flickering artifacts.
   Not "draws black every frame" — that would still cost a full-frame blit and a vsync wait
-  per frame for the entire idle period, on a device whose display is off. Clearing once
-  guarantees nothing stale is in the framebuffer when the panel comes back; after that the
+  per frame for the entire idle period, on a device whose display is off. Clearing twice
+  guarantees nothing stale remains in either framebuffer when the panel comes back; after that the
   application is free to `SDL_Delay()` or block on events.
 - **`update()` still runs**, so `KeyRepeatDriver` timing stays coherent, but see the clamp
   below.
-- **Input is recorded but not dispatched.** `onButtonDown` updates held state and returns
+- **Input is recorded but not dispatched when suspended.** `onButtonDown` updates held state and returns
   without reaching the view stack, so the button press that wakes the device does not also
-  activate whatever happened to be focused. The application observes the press, calls
+  activate whatever happened to be focused. The application observes the wake-up press, calls
   `setSuspended(false)`, and normal dispatch resumes with the next event.
 - On resume, `flushHeld()` runs and the next `draw()` repaints everything — free here,
   because there is no dirty-rect system (§6.3).
@@ -1190,6 +1191,11 @@ while (running) {
     while (SDL_PollEvent(&e)) {
         if (e.type == SDL_QUIT) running = false;
 
+        // Wake up from suspended state on hardware input event
+        if (uiSystem.isSuspended()) {
+            uiSystem.setSuspended(false);
+        }
+
         auto opt = sdlHelper.translate(e);     // see §11
         if (opt) {
             if (opt->kind == ButtonEventKind::Down)
@@ -1206,7 +1212,7 @@ while (running) {
     uiSystem.update(dt);          // clamps dt internally to kMaxDelta
 
     // -- Draw phase --
-    // While suspended, draw() clears to black once and is a no-op thereafter,
+    // While suspended, draw() clears both buffers to black twice and is a no-op thereafter,
     // so the loop is free to sleep instead of spinning (§10.1).
     renderer.beginFrame();
     uiSystem.draw();

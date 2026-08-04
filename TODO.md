@@ -191,70 +191,70 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 ## Phase 6 — Input System
 
-- [ ] Implement `KeyRepeatDriver` in `src/KeyRepeatDriver.cpp` (§9.2)
-  - [ ] `onButtonDown()` / `onButtonUp()` to record/clear held state
-  - [ ] `update(float dt, Sink&&)` template: advances timers, fires synthetic `ButtonEvent`s
-  - [ ] Timing constants: `kInitialDelay = 0.3s`, `kRepeatInterval = 0.1s`, `kFastInterval = 0.03s`, `kFastThreshold = 1.0s`
-  - [ ] `shouldRepeat()`: true for directional and shoulder buttons only; face buttons and Start/Select/Guide do not repeat
-  - [ ] Synthetic events must set `ButtonEvent::synthetic = true`
-  - [ ] Synthetic `Down` **only** — never fabricate a matching `Up` (§9.2)
-  - [ ] `flushHeld()`: drops all held state without emitting anything
-- [ ] Implement `ChordDetector` in `src/ChordDetector.cpp` (§9.4)
-  - [ ] `addChord({Start, Select}, Guide)` as the default registration
-  - [ ] `onButtonDown` / `onButtonUp` return the substituted button, or the original when no chord completes
-  - [ ] `kChordWindow = 0.150f`; individual inputs are suppressed when the chord fires
+- [x] Implement `KeyRepeatDriver` in `src/KeyRepeatDriver.cpp` (§9.2)
+  - [x] `onButtonDown()` / `onButtonUp()` to record/clear held state
+  - [x] `update(float dt, Sink&&)` template: advances timers, fires synthetic `ButtonEvent`s
+  - [x] Timing constants: `kInitialDelay = 0.3s`, `kRepeatInterval = 0.1s`, `kFastInterval = 0.03s`, `kFastThreshold = 1.0s`
+  - [x] `shouldRepeat()`: true for directional and shoulder buttons only; face buttons and Start/Select/Guide do not repeat
+  - [x] Synthetic events must set `ButtonEvent::synthetic = true`
+  - [x] Synthetic `Down` **only** — never fabricate a matching `Up` (§9.2)
+  - [x] `flushHeld()`: drops all held state without emitting anything
+- [x] Implement `ChordDetector` in `src/ChordDetector.cpp` (§9.4)
+  - [x] `addChord({Start, Select}, Guide)` as the default registration
+  - [x] `onButtonDown` / `onButtonUp` return the substituted button, or the original when no chord completes
+  - [x] `kChordWindow = 0.150f`; individual inputs are suppressed when the chord fires
 
 ### ✅ QA Sign-off — Phase 6
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] Holding `Button::Down` for 0.25 s fires zero synthetic events (still within the 300 ms initial delay)
-- [ ] Holding `Button::Down` for 0.35 s fires exactly one synthetic repeat
-- [ ] After the first repeat, subsequent repeats arrive at ~100 ms intervals; measure at least five consecutive repeats and confirm none deviate by more than 10 ms
-- [ ] After holding for more than 1.0 s, the interval drops to ~30 ms; measure at least five consecutive fast repeats
-- [ ] Releasing and immediately re-pressing a button resets the initial delay countdown from zero
-- [ ] Holding `Button::A`, `Button::B`, `Button::X`, `Button::Y`, `Button::Start`, `Button::Select`, and `Button::Guide` for 2 s produces zero synthetic repeat events for each
-- [ ] Every synthetic event has `ButtonEvent::synthetic == true`; real hardware events always have `synthetic == false`
-- [ ] No synthetic `ButtonEventKind::Up` is ever emitted, for any button, under any hold duration
-- [ ] `flushHeld()` while `Down` is held stops all further repeats; a subsequent real `Up` for that button is harmless (no crash, no spurious event)
-- [ ] Pressing Start then Select within 150 ms emits a single `Button::Guide` and **neither** `Start` nor `Select` individually
-- [ ] Pressing Start alone and waiting past the window emits `Start` (delayed by at most `kChordWindow`), not `Guide`
-- [ ] `update()` with a `dt` of 1200.0 s (simulating a wake from screen-off) emits **at most a handful** of repeats, not tens of thousands — verify the `UISystem` clamp is in the path (§10.1)
+- [x] Holding `Button::Down` for 0.25 s fires zero synthetic events (still within the 300 ms initial delay)
+- [x] Holding `Button::Down` for 0.35 s fires exactly one synthetic repeat
+- [x] After the first repeat, subsequent repeats arrive at ~100 ms intervals; measure at least five consecutive repeats and confirm none deviate by more than 10 ms
+- [x] After holding for more than 1.0 s, the interval drops to ~30 ms; measure at least five consecutive fast repeats
+- [x] Releasing and immediately re-pressing a button resets the initial delay countdown from zero
+- [x] Holding `Button::A`, `Button::B`, `Button::X`, `Button::Y`, `Button::Start`, `Button::Select`, and `Button::Guide` for 2 s produces zero synthetic repeat events for each
+- [x] Every synthetic event has `ButtonEvent::synthetic == true`; real hardware events always have `synthetic == false`
+- [x] No synthetic `ButtonEventKind::Up` is ever emitted, for any button, under any hold duration
+- [x] `flushHeld()` while `Down` is held stops all further repeats; a subsequent real `Up` for that button is harmless (no crash, no spurious event)
+- [x] Pressing Start then Select within 150 ms emits a single `Button::Guide` and **neither** `Start` nor `Select` individually
+- [x] Pressing Start alone and waiting past the window emits `Start` (delayed by at most `kChordWindow`), not `Guide`
+- [x] `update()` with a `dt` of 1200.0 s (simulating a wake from screen-off) emits **at most a handful** of repeats, not tens of thousands — verify the `UISystem` clamp is in the path (§10.1)
 
 ---
 
 ## Phase 7 — UISystem
 
-- [ ] Implement `UISystem` in `src/UISystem.cpp` (§10)
-  - [ ] Constructor takes `IRenderer&` and `const Theme&` by reference; owns `ViewStack`, `FocusManager`, `KeyRepeatDriver`
-  - [ ] `onButtonDown()`: feeds `KeyRepeatDriver`, then dispatches to `ViewStack`
-  - [ ] `onButtonUp()`: feeds `KeyRepeatDriver`
-  - [ ] `update(float dt)`: drives `KeyRepeatDriver` (which injects synthetic repeats into `ViewStack`), then calls `ViewStack::update()`
-  - [ ] `draw()`: calls `ViewStack::draw()`
-  - [ ] `viewStack()` and `focusManager()` accessors
-  - [ ] `setAnimationsEnabled(bool)` (§13.6); propagated to views/widgets that animate
-  - [ ] Clamp incoming `elapsedSeconds` to `kMaxDelta = 0.100f` before anything downstream sees it (§10.1)
-  - [ ] Call `ViewStack::applyPendingMutations()` at the top of `update()` **and** again after event dispatch unwinds; call `KeyRepeatDriver::flushHeld()` whenever it reports a change
-  - [ ] Route input through `ChordDetector` before `KeyRepeatDriver` (§9.4)
-  - [ ] `setSuspended(bool)` / `isSuspended()` (§10.1): first `draw()` after suspending clears to black and presents, subsequent `draw()` calls are no-ops; `onButtonDown` records held state but does not dispatch; `flushHeld()` on both suspend and resume
-  - [ ] `setShell(Shell*)` / `shell()`; `draw()` order is chrome → view stack → Shell overlay layer (§12)
+- [x] Implement `UISystem` in `src/UISystem.cpp` (§10)
+  - [x] Constructor takes `IRenderer&` and `const Theme&` by reference; owns `ViewStack`, `FocusManager`, `KeyRepeatDriver`
+  - [x] `onButtonDown()`: feeds `KeyRepeatDriver`, then dispatches to `ViewStack`
+  - [x] `onButtonUp()`: feeds `KeyRepeatDriver`
+  - [x] `update(float dt)`: drives `KeyRepeatDriver` (which injects synthetic repeats into `ViewStack`), then calls `ViewStack::update()`
+  - [x] `draw()`: calls `ViewStack::draw()`
+  - [x] `viewStack()` and `focusManager()` accessors
+  - [x] `setAnimationsEnabled(bool)` (§13.6); propagated to views/widgets that animate
+  - [x] Clamp incoming `elapsedSeconds` to `kMaxDelta = 0.100f` before anything downstream sees it (§10.1)
+  - [x] Call `ViewStack::applyPendingMutations()` at the top of `update()` **and** again after event dispatch unwinds; call `KeyRepeatDriver::flushHeld()` whenever it reports a change
+  - [x] Route input through `ChordDetector` before `KeyRepeatDriver` (§9.4)
+  - [x] `setSuspended(bool)` / `isSuspended()` (§10.1): first two `draw()` calls after suspending clear to black and present (clearing both double-buffers), subsequent `draw()` calls are no-ops; `onButtonDown` records held state but does not dispatch; `flushHeld()` on both suspend and resume
+  - [x] `setShell(Shell*)` / `shell()`; `draw()` order is chrome → view stack → Shell overlay layer (§12)
 
 ### ✅ QA Sign-off — Phase 7
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] A real `onButtonDown(Button::A)` call reaches the top view's `onButtonDown` within the same call frame (no buffering)
-- [ ] Synthetic repeats generated inside `update()` also reach the top view's `onButtonDown` during that same `update()` call
-- [ ] `onButtonUp` stops all repeats for the released button; no further synthetic events arrive in subsequent `update()` calls
-- [ ] `setAnimationsEnabled(false)` is confirmed to propagate: a `GuideOverlayView` stub (or the real one if already implemented) opens instantly instead of animating
-- [ ] Two independent `UISystem` instances can be driven simultaneously without sharing state; driving one does not affect the other
-- [ ] `update(1200.0f)` produces the same observable behaviour as `update(0.1f)`: confirm the clamp with an instrumented `KeyRepeatDriver` sink and count the synthetic events
-- [ ] A view that calls `viewStack().pop()` from `onButtonDown` is destroyed during the *following* `applyPendingMutations()`, not inside the handler
-- [ ] A synthetic repeat that triggers a push is applied before `ViewStack::update()` runs in that same frame
-- [ ] Holding `Button::Down`, then pushing an overlay: the overlay receives **zero** synthetic repeats from the still-held button
-- [ ] `setSuspended(true)`: the first `draw()` issues a black clear plus present; the next ten `draw()` calls issue no renderer commands at all (instrument the renderer)
-- [ ] While suspended, `onButtonDown(Button::A)` does not reach the top view; after `setSuspended(false)` the next press does
-- [ ] With no `Shell` registered (`setShell(nullptr)`), `draw()` works and draws only the view stack
+- [x] A real `onButtonDown(Button::A)` call reaches the top view's `onButtonDown` within the same call frame (no buffering)
+- [x] Synthetic repeats generated inside `update()` also reach the top view's `onButtonDown` during that same `update()` call
+- [x] `onButtonUp` stops all repeats for the released button; no further synthetic events arrive in subsequent `update()` calls
+- [x] `setAnimationsEnabled(false)` is confirmed to propagate: a `GuideOverlayView` stub (or the real one if already implemented) opens instantly instead of animating
+- [x] Two independent `UISystem` instances can be driven simultaneously without sharing state; driving one does not affect the other
+- [x] `update(1200.0f)` produces the same observable behaviour as `update(0.1f)`: confirm the clamp with an instrumented `KeyRepeatDriver` sink and count the synthetic events
+- [x] A view that calls `viewStack().pop()` from `onButtonDown` is destroyed during the *following* `applyPendingMutations()`, not inside the handler
+- [x] A synthetic repeat that triggers a push is applied before `ViewStack::update()` runs in that same frame
+- [x] Holding `Button::Down`, then pushing an overlay: the overlay receives **zero** synthetic repeats from the still-held button
+- [x] `setSuspended(true)`: the first two `draw()` calls issue a black clear plus present; the next ten `draw()` calls issue no renderer commands at all (instrument the renderer)
+- [x] While suspended, `onButtonDown(Button::A)` does not reach the top view; after `setSuspended(false)` the next press does
+- [x] With no `Shell` registered (`setShell(nullptr)`), `draw()` works and draws only the view stack
 
 ---
 

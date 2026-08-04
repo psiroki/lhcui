@@ -4,6 +4,8 @@
 #include "hui/FocusManager.h"
 #include "hui/View.h"
 #include "hui/ViewStack.h"
+#include "hui/UISystem.h"
+#include "hui/Shell.h"
 
 #ifdef HUI_USE_SDL1
 #include <SDL.h>
@@ -25,6 +27,7 @@ namespace example {
 
 // Global references for demo loop and ViewStack
 static hui::ViewStack* g_viewStack = nullptr;
+static hui::UISystem* g_uiSystem = nullptr;
 static bool g_running = true;
 
 // ---------------------------------------------------------------------------
@@ -296,9 +299,10 @@ public:
                 g_viewStack->push(createSettingsView());
             }
         }));
-        buttons_.push_back(std::make_unique<ButtonWidget>("3. Replace with Settings View (Press A)", []() {
-            if (g_viewStack) {
-                g_viewStack->replace(createSettingsView());
+        buttons_.push_back(std::make_unique<ButtonWidget>("3. Toggle Suspend Mode (Press A)", []() {
+            if (g_uiSystem) {
+                g_uiSystem->setSuspended(!g_uiSystem->isSuspended());
+                std::cout << "[Demo] UISystem suspended state: " << (g_uiSystem->isSuspended() ? "true" : "false") << "\n";
             }
         }));
         buttons_.push_back(std::make_unique<ButtonWidget>("4. Quit Application (Press A or B)", []() {
@@ -335,13 +339,13 @@ public:
         // Header Bar
         r.fillRect({bounds_.x, bounds_.y, bounds_.w, 45}, theme.surface);
         r.drawText("MAIN MENU (Base Screen)", {bounds_.x + 20, bounds_.y + 14}, theme.fontBody, theme.textPrimary);
-        r.drawText("Phase 5.5 View Stack Demo", {bounds_.x + 380, bounds_.y + 16}, theme.fontSmall, theme.accent);
+        r.drawText("Phase 6 & 7 Input/UISystem Demo", {bounds_.x + 350, bounds_.y + 16}, theme.fontSmall, theme.accent);
         r.drawLine({bounds_.x, bounds_.y + 45}, {bounds_.x + bounds_.w, bounds_.y + 45}, theme.surfaceAlt);
 
         // Status Card
         hui::Rect statusRect{bounds_.x + 40, bounds_.y + 55, bounds_.w - 80, 35};
         r.fillRect(statusRect, theme.surfaceAlt);
-        r.drawText("Status: Active / Focused Screen",
+        r.drawText("Status: KeyRepeatDriver & ChordDetector Active",
                    {bounds_.x + 55, bounds_.y + 65}, theme.fontSmall, theme.success);
 
         // Menu Buttons
@@ -353,13 +357,20 @@ public:
         hui::Rect hintRect{bounds_.x + 40, bounds_.y + 335, bounds_.w - 80, 115};
         r.fillRect(hintRect, theme.surface);
         r.drawRect(hintRect, theme.surfaceAlt, 1);
-        r.drawText("Controls:", {bounds_.x + 55, bounds_.y + 345}, theme.fontBody, theme.textPrimary);
-        r.drawText("W / S / Up / Down: Move Focus", {bounds_.x + 55, bounds_.y + 368}, theme.fontSmall, theme.textSecondary);
-        r.drawText("Space / Enter / Z / Button A: Select Focused Item", {bounds_.x + 55, bounds_.y + 388}, theme.fontSmall, theme.textSecondary);
-        r.drawText("Escape / X / Button B: Quit / Back", {bounds_.x + 55, bounds_.y + 408}, theme.fontSmall, theme.textSecondary);
+        r.drawText("Controls & Features:", {bounds_.x + 55, bounds_.y + 345}, theme.fontBody, theme.textPrimary);
+        r.drawText("Hold Up / Down: KeyRepeatDriver auto-repeats navigation", {bounds_.x + 55, bounds_.y + 368}, theme.fontSmall, theme.textSecondary);
+        r.drawText("Press [1] + [2] simultaneously: Fires Start+Select -> Guide Chord", {bounds_.x + 55, bounds_.y + 388}, theme.fontSmall, theme.textSecondary);
+        r.drawText("Space / Enter / Z / Button A: Select  |  Esc / X / Button B: Quit", {bounds_.x + 55, bounds_.y + 408}, theme.fontSmall, theme.textSecondary);
     }
 
     bool onButtonDown(hui::Button b, hui::FocusManager& fm) override {
+        if (b == hui::Button::Guide) {
+            std::cout << "[Chord Triggered!] Start+Select -> Guide chord fired!\n";
+            if (g_viewStack) {
+                g_viewStack->push(createContextMenuOverlayView());
+            }
+            return true;
+        }
         if (b == hui::Button::Up) {
             if (focusIndex_ > 0) {
                 --focusIndex_;
@@ -388,7 +399,8 @@ public:
         return {
             {"A", "Select", false, 1},
             {"B", "Quit", false, 2},
-            {"Up/Down", "Navigate", false, 3}
+            {"Up/Down", "Navigate (Held Repeat)", false, 3},
+            {"1+2", "Start+Select Chord -> Guide", false, 4}
         };
     }
 
@@ -439,7 +451,7 @@ int main(int argc, char* argv[]) {
     }
     renderer = std::make_unique<hui::SDL1Renderer>(screen);
 #else
-    SDL_Window* window = SDL_CreateWindow("LHCUI Phase 5.5 Interactive Demo",
+    SDL_Window* window = SDL_CreateWindow("LHCUI Interactive Demo (Phase 6 & 7)",
                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                           640, 480, SDL_WINDOW_SHOWN);
     if (!window) {
@@ -492,16 +504,14 @@ int main(int argc, char* argv[]) {
     theme.fontBody         = fontHandle;
     theme.fontSmall        = fontHandle;
 
-    // FocusManager and ViewStack (bound together)
-    hui::FocusManager focusManager;
-    hui::ViewStack viewStack(&focusManager);
-    viewStack.setContentRect({0, 0, 640, 480});
-    example::g_viewStack = &viewStack;
+    // Instantiate UISystem (owns ViewStack, FocusManager, KeyRepeatDriver, ChordDetector)
+    hui::UISystem uiSystem(*renderer, theme);
+    example::g_viewStack = &uiSystem.viewStack();
+    example::g_uiSystem = &uiSystem;
     example::g_running = true;
 
     // Push initial Base Screen
-    viewStack.push(example::createMainMenuView());
-    viewStack.applyPendingMutations(focusManager);
+    uiSystem.viewStack().push(example::createMainMenuView());
 
     uint64_t lastTime = SDL_GetTicks();
 
@@ -514,32 +524,49 @@ int main(int argc, char* argv[]) {
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) {
                 example::g_running = false;
-            } else if (e.type == SDL_KEYDOWN) {
+            } else if (e.type == SDL_KEYDOWN || e.type == SDL_KEYUP) {
+                // Wake up from suspend mode on key press
+                if (uiSystem.isSuspended() && e.type == SDL_KEYDOWN) {
+                    uiSystem.setSuspended(false);
+                    std::cout << "[Demo] Application woke up from suspend mode on keypress!\n";
+                }
+
                 hui::Button mappedButton = hui::Button::COUNT;
                 switch (e.key.keysym.sym) {
-                    case SDLK_UP:     case SDLK_w: mappedButton = hui::Button::Up; break;
-                    case SDLK_DOWN:   case SDLK_s: mappedButton = hui::Button::Down; break;
-                    case SDLK_LEFT:   case SDLK_a: mappedButton = hui::Button::Left; break;
-                    case SDLK_RIGHT:  case SDLK_d: mappedButton = hui::Button::Right; break;
+                    case SDLK_UP:     mappedButton = hui::Button::Up; break;
+                    case SDLK_DOWN:   mappedButton = hui::Button::Down; break;
+                    case SDLK_LEFT:   mappedButton = hui::Button::Left; break;
+                    case SDLK_RIGHT:  mappedButton = hui::Button::Right; break;
                     case SDLK_RETURN: case SDLK_SPACE: case SDLK_z: mappedButton = hui::Button::A; break;
                     case SDLK_ESCAPE: case SDLK_x: mappedButton = hui::Button::B; break;
+                    case SDLK_1:      mappedButton = hui::Button::Start; break;
+                    case SDLK_2:      mappedButton = hui::Button::Select; break;
+                    case SDLK_g:      mappedButton = hui::Button::Guide; break;
                     default: break;
                 }
                 if (mappedButton != hui::Button::COUNT) {
-                    viewStack.dispatchButtonDown(mappedButton, focusManager);
+                    if (e.type == SDL_KEYDOWN) {
+                        uiSystem.onButtonDown(mappedButton);
+                    } else {
+                        uiSystem.onButtonUp(mappedButton);
+                    }
                 }
             }
         }
 
-        // Drive update on all views
-        viewStack.update(dt, focusManager);
+        // Drive update phase via UISystem (handles dt clamping, key repeat, chord timers, and view updates)
+        uiSystem.update(dt);
 
-        // Render frame
+        // Render frame via UISystem
         renderer->beginFrame();
-        viewStack.draw(*renderer, theme);
+        uiSystem.draw();
         renderer->endFrame();
 
-        SDL_Delay(16);
+        if (uiSystem.isSuspended()) {
+            SDL_Delay(100);
+        } else {
+            SDL_Delay(16);
+        }
     }
 
     if (rawFont) {
