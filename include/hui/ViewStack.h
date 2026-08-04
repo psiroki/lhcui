@@ -10,46 +10,16 @@
 
 namespace hui {
 
-// §8.4 Screen Transitions
-enum class TransitionKind {
-    None,
-    SlideLeft,
-    SlideRight,
-    FadeThrough
-};
-
-struct SimpleTransition {
-    TransitionKind kind = TransitionKind::None;
-    float duration = 0.2f; // seconds
-    float progress = 0.0f; // 0.0f to 1.0f
-
-    bool isComplete() const { return progress >= 1.0f; }
-
-    void update(float dt) {
-        if (duration > 0.0f) {
-            progress += dt / duration;
-            if (progress > 1.0f) progress = 1.0f;
-        } else {
-            progress = 1.0f;
-        }
-    }
-
-    void reset() {
-        progress = 0.0f;
-    }
-};
-
 // §8.2 ViewStack
 //
 // Manages a stack of View objects.
 //
-// All views in the stack are drawn bottom-to-top so that overlay views (context menus,
-// guide panel) render above base screens.
+// All mutations (push, pop, popTo, replace) are deferred until applyPendingMutations()
+// is called. This prevents use-after-free defects when views trigger navigation
+// from inside event handlers.
 //
-// Alpha dimming is applied via setGlobalAlpha(128) to all non-top views when stack depth > 1,
-// and setGlobalAlpha(255) is restored before drawing the top view.
-//
-// Only the topmost view receives input events via dispatchButtonDown/Up.
+// Views are drawn bottom-to-top. Any view returning dimsBelow() == true triggers
+// a single full-screen fill (theme.overlay) drawn immediately before that view.
 class ViewStack {
 public:
     explicit ViewStack(FocusManager* fm = nullptr) : fm_(fm) {}
@@ -64,24 +34,31 @@ public:
     void setFocusManager(FocusManager* fm) { fm_ = fm; }
     FocusManager* focusManager() const { return fm_; }
 
-    // Pushes a new view onto the stack.
-    // Previous top gets onSuspend(). New view gets onPush(). Takes ownership.
+    // Content area rect passed to stacked views via layout(contentRect_)
+    void setContentRect(Rect r);
+    Rect contentRect() const { return contentRect_; }
+
+    // Enqueues a push mutation.
     void push(std::unique_ptr<View> view);
 
-    // Pops the top view off the stack.
-    // It gets onPop(). The view below gets onResume(). No-op if stack depth <= 1.
+    // Enqueues a pop mutation.
     void pop();
 
-    // Pops views until a view of type T is at the top of the stack or only 1 view remains.
+    // Enqueues a popTo mutation.
     template<typename T>
     void popTo() {
-        while (stack_.size() > 1 && !stack_.back()->template isType<T>()) {
-            pop();
-        }
+        popToType(View::typeIdFor<T>());
     }
 
-    // Replaces the current top view with a new view (atomic pop + push).
+    void popToType(const void* typeId);
+
+    // Enqueues a replace mutation.
     void replace(std::unique_ptr<View> view);
+
+    // Applies all queued mutations. Returns true if the stack changed.
+    bool applyPendingMutations(FocusManager& fm);
+    bool applyPendingMutations();
+    bool hasPendingMutations() const { return !pendingMutations_.empty(); }
 
     // Returns pointer to the current top view, or nullptr if stack is empty.
     View* top() const {
@@ -90,13 +67,12 @@ public:
 
     bool empty() const { return stack_.empty(); }
     size_t size() const { return stack_.size(); }
+    size_t depth() const { return stack_.size(); }
 
     // Drives update(dt, fm) on all views currently in the stack (bottom to top).
     void update(float dt, FocusManager& fm);
 
     // Draws all views bottom-to-top.
-    // Applies setGlobalAlpha(128) and setDimmed(true) to non-top views when depth > 1,
-    // and setGlobalAlpha(255) and setDimmed(false) to the top view.
     void draw(IRenderer& renderer, const Theme& theme);
 
     // Delivers button event strictly to top() view.
@@ -104,8 +80,18 @@ public:
     bool dispatchButtonUp  (Button b, FocusManager& fm);
 
 private:
+    enum class MutationType { Push, Pop, PopTo, Replace };
+
+    struct PendingMutation {
+        MutationType type;
+        std::unique_ptr<View> view;
+        const void* targetTypeId = nullptr;
+    };
+
     std::vector<std::unique_ptr<View>> stack_;
+    std::vector<PendingMutation> pendingMutations_;
     FocusManager* fm_ = nullptr;
+    Rect contentRect_{0, 0, 640, 480};
 };
 
 } // namespace hui

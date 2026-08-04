@@ -9,30 +9,33 @@ class FocusManager; // forward declaration for friend
 
 // §6.1 Widget Base Class
 //
-// Widgets are immediate-mode at the draw level: they receive their bounding
-// Rect on every draw() call. There is no retained layout tree.
+// Retained layout: Widget stores its bounds_ set by layout(Rect).
+// Draw receives no Rect parameter.
 //
 // Focus state is managed exclusively by FocusManager, which is a friend class.
-// Widgets must not call setFocused() themselves.
-//
-// Internal focus indices (e.g. in ListView) must NOT be reset on onBlur();
-// they persist until explicitly reset by the owning View.
+// Widgets must not call focus setters themselves.
 class Widget {
 public:
     virtual ~Widget() = default;
 
+    // Layout assignment. Sets bounds_ for drawing and hit/input queries.
+    virtual void layout(Rect r) { bounds_ = r; }
+    Rect bounds() const { return bounds_; }
+
     // Called once per frame. dt = elapsed seconds since last call.
     virtual void update(float dt) { (void)dt; }
 
-    // Called once per frame after update(). r is the rect this widget occupies.
-    virtual void draw(IRenderer& renderer, Rect r, const Theme& theme) = 0;
+    // Called once per frame after update(). Draws within bounds_.
+    virtual void draw(IRenderer& renderer, const Theme& theme) = 0;
+
+    // Focus eligibility query. Default is false (non-focusable).
+    virtual bool isFocusable() const { return false; }
 
     // Event dispatch. Returns true if the event was consumed (stops propagation).
     virtual bool onButtonDown(Button b) { (void)b; return false; }
     virtual bool onButtonUp(Button b)   { (void)b; return false; }
 
     // Focus lifecycle callbacks. Subclasses override to react to focus changes.
-    // Called by setFocused(), which is only invoked by FocusManager.
     virtual void onFocus() {}
     virtual void onBlur()  {}
 
@@ -43,6 +46,9 @@ public:
 
     void setDisabled(bool d) { disabled_ = d; }
 
+protected:
+    Rect bounds_{0, 0, 0, 0};
+
 private:
     bool focused_  = false;
     bool disabled_ = false;
@@ -51,7 +57,11 @@ private:
     // from being called by accident from widget code.
     friend class FocusManager;
 
-    void setFocused(bool f) {
+    void setFocusedFlag(bool f) {
+        focused_ = f;
+    }
+
+    void setFocusedAndNotify(bool f) {
         focused_ = f;
         if (f) onFocus();
         else   onBlur();

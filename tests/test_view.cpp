@@ -11,18 +11,19 @@
 using namespace hui;
 
 // ---------------------------------------------------------------------------
-// Mock IRenderer for testing draw() and alpha dimming.
+// Mock IRenderer for testing draw() and scrim fills.
 // ---------------------------------------------------------------------------
 class MockRenderer : public IRenderer {
 public:
     uint8_t lastAlpha = 255;
     std::vector<uint8_t> alphaHistory;
+    int fillRectCount = 0;
 
     void beginFrame() override {}
     void endFrame() override {}
     void pushClip(Rect) override {}
     void popClip() override {}
-    void fillRect(Rect, Color) override {}
+    void fillRect(Rect, Color) override { ++fillRectCount; }
     void drawRect(Rect, Color, int) override {}
     void drawLine(Point, Point, Color) override {}
     int drawText(std::string_view, Point, FontHandle, Color) override { return 0; }
@@ -48,10 +49,13 @@ class TestWidget : public Widget {
 public:
     int focusCount = 0;
     int blurCount  = 0;
+    bool focusable = true;
+
+    bool isFocusable() const override { return focusable; }
 
     void onFocus() override { ++focusCount; }
     void onBlur()  override { ++blurCount;  }
-    void draw(IRenderer&, Rect, const Theme&) override {}
+    void draw(IRenderer&, const Theme&) override {}
 };
 
 // ---------------------------------------------------------------------------
@@ -59,17 +63,18 @@ public:
 // ---------------------------------------------------------------------------
 class InstrumentedView : public View {
 public:
+    HUI_VIEW_TYPE(InstrumentedView)
+
     std::string name;
     std::vector<std::string>* eventLog;
     bool handleButton = false;
     bool buttonReceived = false;
-
-    // Track recorded dimmed states at draw time
-    bool wasDimmedOnDraw = false;
-    uint8_t alphaOnDraw = 0;
+    bool modal = false;
 
     InstrumentedView(std::string name, std::vector<std::string>* log)
         : name(std::move(name)), eventLog(log) {}
+
+    bool dimsBelow() const override { return modal; }
 
     void onPush() override {
         if (eventLog) eventLog->push_back(name + "::onPush");
@@ -84,17 +89,31 @@ public:
         if (eventLog) eventLog->push_back(name + "::onSuspend");
     }
 
-    void draw(IRenderer& r, const Theme&) override {
-        wasDimmedOnDraw = isDimmed();
-        if (auto* mr = dynamic_cast<MockRenderer*>(&r)) {
-            alphaOnDraw = mr->lastAlpha;
-        }
-    }
+    void draw(IRenderer&, const Theme&) override {}
 
     bool onButtonDown(Button, FocusManager&) override {
         buttonReceived = true;
         return handleButton;
     }
+};
+
+class SelfPoppingView : public View {
+public:
+    ViewStack* stackPtr = nullptr;
+    bool onButtonDownExecuted = false;
+
+    explicit SelfPoppingView(ViewStack* stack) : stackPtr(stack) {}
+
+    bool onButtonDown(Button b, FocusManager&) override {
+        (void)b;
+        if (stackPtr) {
+            stackPtr->pop();
+        }
+        onButtonDownExecuted = true;
+        return true;
+    }
+
+    void draw(IRenderer&, const Theme&) override {}
 };
 
 class ViewTypeA : public View {
@@ -116,7 +135,7 @@ public:
 };
 
 // ---------------------------------------------------------------------------
-// Tests covering Phase 5 QA sign-off checklist & DESIGN.md §8.2 signatures
+// Tests covering Phase 5 QA sign-off checklist & deferred mutations
 // ---------------------------------------------------------------------------
 
 TEST_CASE("ViewStack — push call order (A onSuspend before B onPush)") {
@@ -125,10 +144,12 @@ TEST_CASE("ViewStack — push call order (A onSuspend before B onPush)") {
     ViewStack stack(&fm);
 
     stack.push(std::make_unique<InstrumentedView>("A", &log));
+    stack.applyPendingMutations(fm);
     CHECK(log == std::vector<std::string>{"A::onPush"});
 
     log.clear();
     stack.push(std::make_unique<InstrumentedView>("B", &log));
+    stack.applyPendingMutations(fm);
     CHECK(log == std::vector<std::string>{"A::onSuspend", "B::onPush"});
 }
 
@@ -139,9 +160,11 @@ TEST_CASE("ViewStack — pop call order (B onPop before A onResume)") {
 
     stack.push(std::make_unique<InstrumentedView>("A", &log));
     stack.push(std::make_unique<InstrumentedView>("B", &log));
+    stack.applyPendingMutations(fm);
 
     log.clear();
     stack.pop();
+    stack.applyPendingMutations(fm);
     CHECK(log == std::vector<std::string>{"B::onPop", "A::onResume"});
 }
 
@@ -151,13 +174,15 @@ TEST_CASE("ViewStack — pop on single-entry stack is no-op") {
     ViewStack stack(&fm);
 
     stack.push(std::make_unique<InstrumentedView>("A", &log));
+    stack.applyPendingMutations(fm);
     CHECK(stack.size() == 1);
 
     log.clear();
     stack.pop();
+    stack.applyPendingMutations(fm);
     CHECK(stack.size() == 1);
     CHECK(stack.top() != nullptr);
-    CHECK(log.empty()); // No onPop or onResume fired
+    CHECK(log.empty());
 }
 
 TEST_CASE("ViewStack — dispatchButtonDown delivers event ONLY to top view") {
@@ -173,6 +198,7 @@ TEST_CASE("ViewStack — dispatchButtonDown delivers event ONLY to top view") {
 
     stack.push(std::move(viewA));
     stack.push(std::move(viewB));
+    stack.applyPendingMutations(fm);
 
     bool consumed = stack.dispatchButtonDown(Button::A, fm);
     CHECK(consumed == false);
@@ -180,35 +206,52 @@ TEST_CASE("ViewStack — dispatchButtonDown delivers event ONLY to top view") {
     CHECK(ptrA->buttonReceived == false);
 }
 
-TEST_CASE("ViewStack — alpha dimming during draw()") {
+TEST_CASE("ViewStack — scrim dimming via dimsBelow()") {
     FocusManager fm;
     ViewStack stack(&fm);
 
     std::vector<std::string> log;
-    auto viewA = std::make_unique<InstrumentedView>("A", &log);
-    auto viewB = std::make_unique<InstrumentedView>("B", &log);
-
-    InstrumentedView* ptrA = viewA.get();
-    InstrumentedView* ptrB = viewB.get();
+    auto viewA = std::make_unique<InstrumentedView>("Base", &log);
+    auto viewB = std::make_unique<InstrumentedView>("Modal", &log);
+    viewB->modal = true;
 
     stack.push(std::move(viewA));
     stack.push(std::move(viewB));
+    stack.applyPendingMutations(fm);
 
     MockRenderer renderer;
     Theme theme{};
 
     stack.draw(renderer, theme);
 
-    // Non-top view (A) drawn dimmed with global alpha 128
-    CHECK(ptrA->wasDimmedOnDraw == true);
-    CHECK(ptrA->alphaOnDraw == 128);
+    // Exactly one full-screen fill (theme.overlay) issued before modal view
+    CHECK(renderer.fillRectCount == 1);
 
-    // Top view (B) drawn non-dimmed with global alpha 255
-    CHECK(ptrB->wasDimmedOnDraw == false);
-    CHECK(ptrB->alphaOnDraw == 255);
+    // ViewStack makes NO setGlobalAlpha calls
+    CHECK(renderer.alphaHistory.empty());
 }
 
-TEST_CASE("View — suspendFocus and restoreFocus via forceOwner and widget isFocused invariant") {
+TEST_CASE("ViewStack — deferred pop safety (self-popping overlay)") {
+    FocusManager fm;
+    ViewStack stack(&fm);
+    std::vector<std::string> log;
+
+    stack.push(std::make_unique<InstrumentedView>("Base", &log));
+    stack.push(std::make_unique<SelfPoppingView>(&stack));
+    stack.applyPendingMutations(fm);
+    CHECK(stack.depth() == 2);
+
+    // Dispatch button down. SelfPoppingView enqueues pop() from inside onButtonDown.
+    // Must NOT crash or use-after-free.
+    bool consumed = stack.dispatchButtonDown(Button::A, fm);
+    CHECK(consumed == true);
+
+    // After dispatchButtonDown unwinds and applies pending mutations, stack depth is 1
+    CHECK(stack.depth() == 1);
+    CHECK(stack.top()->isType<InstrumentedView>());
+}
+
+TEST_CASE("View — suspendFocus and restoreFocus via forceOwner") {
     FocusManager fm;
     TestWidget widgetA;
     TestWidget widgetB;
@@ -216,36 +259,30 @@ TEST_CASE("View — suspendFocus and restoreFocus via forceOwner and widget isFo
     ViewStack stack(&fm);
     std::vector<std::string> log;
 
-    // Push base View A
     stack.push(std::make_unique<InstrumentedView>("A", &log));
+    stack.applyPendingMutations(fm);
 
-    // Focus widgetA on View A
     fm.setFocus(&widgetA);
     CHECK(widgetA.isFocused() == true);
     CHECK(widgetA.focusCount == 1);
     CHECK(widgetA.blurCount == 0);
 
-    // Push overlay View B -> this suspends View A, recording savedFocus_ = &widgetA
+    // Push overlay View B -> suspends View A, clearing focus so widgetA gets onBlur
     stack.push(std::make_unique<InstrumentedView>("B", &log));
-    CHECK(stack.top()->savedFocus() == nullptr); // View B has no saved focus yet
-    CHECK(log.back() == "B::onPush");
+    stack.applyPendingMutations(fm);
 
-    // Focus shifts to widgetB while overlay View B is active
-    fm.setFocus(&widgetB);
-    CHECK(widgetB.isFocused() == true);
     CHECK(widgetA.isFocused() == false);
     CHECK(widgetA.blurCount == 1);
 
-    // Pop overlay View B -> View A resumes and restores focus to widgetA via forceOwner
+    fm.setFocus(&widgetB);
+    CHECK(widgetB.isFocused() == true);
+
+    // Pop overlay View B -> restores focus to widgetA via forceOwner without callbacks
     stack.pop();
+    stack.applyPendingMutations(fm);
 
-    // Current focused widget is widgetA again
     CHECK(fm.focused() == &widgetA);
-
-    // State invariant assertion: widgetA.isFocused() must be true after forceOwner!
     CHECK(widgetA.isFocused() == true);
-
-    // forceOwner must NOT have triggered additional onFocus/onBlur callbacks on widgetA during restoreFocus!
     CHECK(widgetA.focusCount == 1);
     CHECK(widgetA.blurCount == 1);
 }
@@ -257,11 +294,13 @@ TEST_CASE("ViewStack — popTo<T>()") {
     stack.push(std::make_unique<ViewTypeA>());
     stack.push(std::make_unique<ViewTypeB>());
     stack.push(std::make_unique<ViewTypeC>());
+    stack.applyPendingMutations(fm);
 
     CHECK(stack.size() == 3);
     CHECK(stack.top()->isType<ViewTypeC>());
 
     stack.popTo<ViewTypeA>();
+    stack.applyPendingMutations(fm);
 
     CHECK(stack.size() == 1);
     CHECK(stack.top()->isType<ViewTypeA>());
@@ -273,31 +312,12 @@ TEST_CASE("ViewStack — replace()") {
     ViewStack stack(&fm);
 
     stack.push(std::make_unique<InstrumentedView>("A", &log));
+    stack.applyPendingMutations(fm);
     log.clear();
 
     stack.replace(std::make_unique<InstrumentedView>("B", &log));
+    stack.applyPendingMutations(fm);
 
     CHECK(stack.size() == 1);
     CHECK(log == std::vector<std::string>{"A::onPop", "B::onPush"});
-}
-
-TEST_CASE("SimpleTransition — update and reset") {
-    SimpleTransition t;
-    t.kind = TransitionKind::SlideLeft;
-    t.duration = 0.5f;
-
-    CHECK(t.progress == 0.0f);
-    CHECK(t.isComplete() == false);
-
-    t.update(0.25f);
-    CHECK(t.progress == doctest::Approx(0.5f));
-    CHECK(t.isComplete() == false);
-
-    t.update(0.3f);
-    CHECK(t.progress == 1.0f);
-    CHECK(t.isComplete() == true);
-
-    t.reset();
-    CHECK(t.progress == 0.0f);
-    CHECK(t.isComplete() == false);
 }

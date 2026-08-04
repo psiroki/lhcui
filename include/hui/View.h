@@ -37,6 +37,11 @@ public:
         return typeId() == typeIdFor<T>();
     }
 
+    // --- Layout ---
+
+    virtual void layout(Rect contentRect) { bounds_ = contentRect; }
+    Rect bounds() const { return bounds_; }
+
     // --- Lifecycle Hooks ---
 
     // Called when this view becomes the new top of the ViewStack.
@@ -78,11 +83,11 @@ public:
         return false;
     }
 
-    // --- Dimming state ---
+    // --- Dimming query ---
 
-    // Called by ViewStack to indicate whether this view is obscured by an overlay above it.
-    void setDimmed(bool d) { dimmed_ = d; }
-    bool isDimmed() const  { return dimmed_; }
+    // Returns true if pushing this view should cause ViewStack to draw a dark
+    // scrim (theme.overlay) over all views beneath it.
+    virtual bool dimsBelow() const { return false; }
 
     // --- Hint Bar Data ---
 
@@ -91,21 +96,25 @@ public:
 
     // --- Focus Save / Restore ---
 
-    // Records the currently focused widget before an overlay is pushed on top.
+    // Records the currently focused widget before an overlay is pushed on top,
+    // and clears focus on fm so the outgoing widget receives onBlur.
     void suspendFocus(FocusManager& fm) {
         savedFocus_ = fm.focused();
+        fm.setFocus(nullptr);
     }
 
     // Restores focus to the saved widget when an overlay is popped.
     // Uses forceOwner so that no lifecycle callbacks are double-fired.
-    void restoreFocus(FocusManager& fm) {
-        fm.forceOwner(savedFocus_);
+    virtual void restoreFocus(FocusManager& fm) {
+        if (savedFocus_) {
+            fm.forceOwner(savedFocus_);
+        }
     }
 
     Widget* savedFocus() const { return savedFocus_; }
 
 protected:
-    bool dimmed_ = false;
+    Rect bounds_{0, 0, 0, 0};
     Widget* savedFocus_ = nullptr;
 };
 

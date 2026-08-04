@@ -2,60 +2,120 @@
 
 namespace hui {
 
-void ViewStack::push(std::unique_ptr<View> view) {
-    if (!view) return;
-
-    if (!stack_.empty()) {
-        stack_.back()->onSuspend();
-        if (fm_) {
-            stack_.back()->suspendFocus(*fm_);
+void ViewStack::setContentRect(Rect r) {
+    contentRect_ = r;
+    for (auto& view : stack_) {
+        if (view) {
+            view->layout(contentRect_);
         }
     }
+}
 
-    stack_.push_back(std::move(view));
-    stack_.back()->onPush();
+void ViewStack::push(std::unique_ptr<View> view) {
+    if (!view) return;
+    pendingMutations_.push_back({MutationType::Push, std::move(view), nullptr});
 }
 
 void ViewStack::pop() {
-    if (stack_.size() <= 1) {
-        return; // no-op on single-entry or empty stack
-    }
+    pendingMutations_.push_back({MutationType::Pop, nullptr, nullptr});
+}
 
-    std::unique_ptr<View> oldTop = std::move(stack_.back());
-    stack_.pop_back();
-    oldTop->onPop();
-
-    View* newTop = stack_.back().get();
-    newTop->onResume();
-    if (fm_) {
-        newTop->restoreFocus(*fm_);
-    }
+void ViewStack::popToType(const void* typeId) {
+    pendingMutations_.push_back({MutationType::PopTo, nullptr, typeId});
 }
 
 void ViewStack::replace(std::unique_ptr<View> view) {
     if (!view) return;
+    pendingMutations_.push_back({MutationType::Replace, std::move(view), nullptr});
+}
 
-    if (stack_.empty()) {
-        push(std::move(view));
-        return;
+bool ViewStack::applyPendingMutations(FocusManager& fm) {
+    fm_ = &fm;
+    if (pendingMutations_.empty()) return false;
+
+    std::vector<PendingMutation> queue = std::move(pendingMutations_);
+    pendingMutations_.clear();
+
+    bool changed = false;
+
+    for (auto& m : queue) {
+        switch (m.type) {
+            case MutationType::Push: {
+                if (!m.view) break;
+                if (!stack_.empty()) {
+                    stack_.back()->suspendFocus(fm);
+                    stack_.back()->onSuspend();
+                }
+                m.view->onPush();
+                m.view->layout(contentRect_);
+                stack_.push_back(std::move(m.view));
+                stack_.back()->restoreFocus(fm);
+                changed = true;
+                break;
+            }
+            case MutationType::Pop: {
+                if (stack_.size() <= 1) break;
+                stack_.back()->suspendFocus(fm);
+                std::unique_ptr<View> oldTop = std::move(stack_.back());
+                stack_.pop_back();
+                oldTop->onPop();
+                oldTop.reset();
+
+                stack_.back()->onResume();
+                stack_.back()->restoreFocus(fm);
+                changed = true;
+                break;
+            }
+            case MutationType::PopTo: {
+                bool poppedAny = false;
+                while (stack_.size() > 1 && stack_.back()->typeId() != m.targetTypeId) {
+                    stack_.back()->suspendFocus(fm);
+                    std::unique_ptr<View> oldTop = std::move(stack_.back());
+                    stack_.pop_back();
+                    oldTop->onPop();
+                    oldTop.reset();
+                    poppedAny = true;
+                }
+                if (poppedAny && !stack_.empty()) {
+                    stack_.back()->onResume();
+                    stack_.back()->restoreFocus(fm);
+                    changed = true;
+                }
+                break;
+            }
+            case MutationType::Replace: {
+                if (!m.view) break;
+                if (!stack_.empty()) {
+                    stack_.back()->suspendFocus(fm);
+                    std::unique_ptr<View> oldTop = std::move(stack_.back());
+                    stack_.pop_back();
+                    oldTop->onPop();
+                    oldTop.reset();
+                }
+                m.view->onPush();
+                m.view->layout(contentRect_);
+                stack_.push_back(std::move(m.view));
+                stack_.back()->restoreFocus(fm);
+                changed = true;
+                break;
+            }
+        }
     }
 
+    return changed;
+}
+
+bool ViewStack::applyPendingMutations() {
     if (fm_) {
-        fm_->setFocus(nullptr);
+        return applyPendingMutations(*fm_);
     }
-
-    std::unique_ptr<View> oldTop = std::move(stack_.back());
-    stack_.pop_back();
-    oldTop->onPop();
-
-    stack_.push_back(std::move(view));
-    stack_.back()->onPush();
+    return false;
 }
 
 void ViewStack::update(float dt, FocusManager& fm) {
-    if (!fm_) {
-        fm_ = &fm;
-    }
+    fm_ = &fm;
+    applyPendingMutations(fm);
+
     for (size_t i = 0; i < stack_.size(); ++i) {
         stack_[i]->update(dt, fm);
     }
@@ -64,39 +124,31 @@ void ViewStack::update(float dt, FocusManager& fm) {
 void ViewStack::draw(IRenderer& renderer, const Theme& theme) {
     if (stack_.empty()) return;
 
-    if (stack_.size() == 1) {
-        stack_[0]->setDimmed(false);
-        renderer.setGlobalAlpha(255);
-        stack_[0]->draw(renderer, theme);
-    } else {
-        // Draw non-top views bottom-to-top with dimming (global alpha 128)
-        renderer.setGlobalAlpha(128);
-        for (size_t i = 0; i < stack_.size() - 1; ++i) {
-            stack_[i]->setDimmed(true);
-            stack_[i]->draw(renderer, theme);
-        }
+    Size screen = renderer.screenSize();
+    Rect fullScreen{0, 0, screen.w, screen.h};
 
-        // Draw top view at full opacity (global alpha 255)
-        renderer.setGlobalAlpha(255);
-        stack_.back()->setDimmed(false);
-        stack_.back()->draw(renderer, theme);
+    for (size_t i = 0; i < stack_.size(); ++i) {
+        if (i > 0 && stack_[i]->dimsBelow()) {
+            renderer.fillRect(fullScreen, theme.overlay);
+        }
+        stack_[i]->draw(renderer, theme);
     }
 }
 
 bool ViewStack::dispatchButtonDown(Button b, FocusManager& fm) {
-    if (!fm_) {
-        fm_ = &fm;
-    }
+    fm_ = &fm;
     if (stack_.empty()) return false;
-    return stack_.back()->onButtonDown(b, fm);
+    bool res = stack_.back()->onButtonDown(b, fm);
+    applyPendingMutations(fm);
+    return res;
 }
 
 bool ViewStack::dispatchButtonUp(Button b, FocusManager& fm) {
-    if (!fm_) {
-        fm_ = &fm;
-    }
+    fm_ = &fm;
     if (stack_.empty()) return false;
-    return stack_.back()->onButtonUp(b, fm);
+    bool res = stack_.back()->onButtonUp(b, fm);
+    applyPendingMutations(fm);
+    return res;
 }
 
 } // namespace hui

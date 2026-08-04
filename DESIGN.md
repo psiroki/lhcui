@@ -3,13 +3,6 @@
 **Revision 2.** A C++ UI toolkit library for Linux handheld consoles.  
 Target hardware: Cortex-A53 + Mali-G31 MP2 class SoCs. GPU-less targets supported.  
 Renderer backend: SDL2 (default) or SDL1 (build-time opt-in).
-
-> **⚠ If you are implementing from this document and the codebase already exists,
-> read `MIGRATION.md` first.** Revision 2 changes decisions inside Phases 4 and 5, which are
-> already marked complete in `TODO.md`. The existing code does *not* match this document until
-> the retrofit in Phase 5.5 is done. `MIGRATION.md` lists exactly what changed and what to
-> touch, and tells you when to delete itself.
-
 ---
 
 ## Table of Contents

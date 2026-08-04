@@ -38,24 +38,26 @@ public:
     ButtonWidget(std::string text, std::function<void()> callback = nullptr)
         : label(std::move(text)), onClick(std::move(callback)) {}
 
-    void draw(hui::IRenderer& r, hui::Rect bounds, const hui::Theme& theme) override {
+    bool isFocusable() const override { return true; }
+
+    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
         // Draw card background
         hui::Color bg = isFocused() ? theme.focusFillColor : theme.surface;
-        r.fillRect(bounds, bg);
+        r.fillRect(bounds_, bg);
 
         // Draw border: thick accent border when focused
         if (isFocused()) {
-            r.drawRect(bounds, theme.focusBorderColor, theme.focusBorderWidth);
+            r.drawRect(bounds_, theme.focusBorderColor, theme.focusBorderWidth);
             // Visual cursor indicator on the left
-            r.fillRect({bounds.x + 4, bounds.y + 4, 6, bounds.h - 8}, theme.accent);
+            r.fillRect({bounds_.x + 4, bounds_.y + 4, 6, bounds_.h - 8}, theme.accent);
         } else {
-            r.drawRect(bounds, theme.surfaceAlt, 1);
+            r.drawRect(bounds_, theme.surfaceAlt, 1);
         }
 
         // Draw label text
         hui::Color textColor = isFocused() ? theme.textPrimary : theme.textSecondary;
-        int textX = bounds.x + (isFocused() ? 20 : 16);
-        int textY = bounds.y + (bounds.h - 16) / 2;
+        int textX = bounds_.x + (isFocused() ? 20 : 16);
+        int textY = bounds_.y + (bounds_.h - 16) / 2;
         r.drawText(label, {textX, textY}, theme.fontBody, textColor);
     }
 
@@ -91,6 +93,18 @@ public:
         }));
     }
 
+    bool dimsBelow() const override { return true; }
+
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        hui::Rect modalRect{bounds_.x + 120, bounds_.y + 90, 400, 290};
+        int itemY = modalRect.y + 80;
+        for (size_t i = 0; i < buttons_.size(); ++i) {
+            buttons_[i]->layout({modalRect.x + 20, itemY, modalRect.w - 40, 48});
+            itemY += 60;
+        }
+    }
+
     void onPush() override {
         focusIndex_ = 0;
     }
@@ -105,11 +119,8 @@ public:
     }
 
     void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        // Fill full screen with dark overlay background
-        r.fillRect({0, 0, 640, 480}, theme.overlay);
-
-        // Draw modal card window
-        hui::Rect modalRect{120, 90, 400, 290};
+        // Draw modal card window (ViewStack draws the single scrim behind us)
+        hui::Rect modalRect{bounds_.x + 120, bounds_.y + 90, 400, 290};
         r.fillRect(modalRect, theme.surface);
         r.drawRect(modalRect, theme.accent, 2);
 
@@ -118,11 +129,8 @@ public:
         r.drawText("Base screen behind is dimmed automatically!", {modalRect.x + 20, modalRect.y + 45}, theme.fontSmall, theme.textSecondary);
 
         // Draw options inside modal
-        int itemY = modalRect.y + 80;
         for (size_t i = 0; i < buttons_.size(); ++i) {
-            hui::Rect itemRect{modalRect.x + 20, itemY, modalRect.w - 40, 48};
-            buttons_[i]->draw(r, itemRect, theme);
-            itemY += 60;
+            buttons_[i]->draw(r, theme);
         }
 
         // Footer hint
@@ -190,6 +198,15 @@ public:
         }));
     }
 
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        int itemY = bounds_.y + 80;
+        for (size_t i = 0; i < buttons_.size(); ++i) {
+            buttons_[i]->layout({bounds_.x + 40, itemY, bounds_.w - 80, 50});
+            itemY += 65;
+        }
+    }
+
     void onPush() override {
         focusIndex_ = 0;
     }
@@ -204,23 +221,20 @@ public:
     }
 
     void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect({0, 0, 640, 480}, theme.background);
+        r.fillRect(bounds_, theme.background);
 
         // Top title bar
-        r.fillRect({0, 0, 640, 50}, theme.surface);
-        r.drawText("SETTINGS SCREEN (Full View Pushed)", {20, 16}, theme.fontBody, theme.textPrimary);
-        r.drawLine({0, 50}, {640, 50}, theme.surfaceAlt);
+        r.fillRect({bounds_.x, bounds_.y, bounds_.w, 50}, theme.surface);
+        r.drawText("SETTINGS SCREEN (Full View Pushed)", {bounds_.x + 20, bounds_.y + 16}, theme.fontBody, theme.textPrimary);
+        r.drawLine({bounds_.x, bounds_.y + 50}, {bounds_.x + bounds_.w, bounds_.y + 50}, theme.surfaceAlt);
 
         // Content
-        int itemY = 80;
         for (size_t i = 0; i < buttons_.size(); ++i) {
-            hui::Rect itemRect{40, itemY, 560, 50};
-            buttons_[i]->draw(r, itemRect, theme);
-            itemY += 65;
+            buttons_[i]->draw(r, theme);
         }
 
         // Instructions
-        r.drawText("Press B or select Option 2 to go back / Main Menu. Select Option 3 to Quit.", {40, 380}, theme.fontSmall, theme.textSecondary);
+        r.drawText("Press B or select Option 2 to go back / Main Menu. Select Option 3 to Quit.", {bounds_.x + 40, bounds_.y + 380}, theme.fontSmall, theme.textSecondary);
     }
 
     bool onButtonDown(hui::Button b, hui::FocusManager& fm) override {
@@ -293,6 +307,15 @@ public:
         }));
     }
 
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        int itemY = bounds_.y + 100;
+        for (size_t i = 0; i < buttons_.size(); ++i) {
+            buttons_[i]->layout({bounds_.x + 40, itemY, bounds_.w - 80, 48});
+            itemY += 56;
+        }
+    }
+
     void onPush() override {
         focusIndex_ = 0;
     }
@@ -301,44 +324,39 @@ public:
         (void)dt;
         if (!buttons_.empty() && focusIndex_ >= 0 && focusIndex_ < static_cast<int>(buttons_.size())) {
             if (!fm.focused() || !buttons_[focusIndex_]->isFocused()) {
-                if (!isDimmed()) {
-                    fm.setFocus(buttons_[focusIndex_].get());
-                }
+                fm.setFocus(buttons_[focusIndex_].get());
             }
         }
     }
 
     void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect({0, 0, 640, 480}, theme.background);
+        r.fillRect(bounds_, theme.background);
 
         // Header Bar
-        r.fillRect({0, 0, 640, 45}, theme.surface);
-        r.drawText("MAIN MENU (Base Screen)", {20, 14}, theme.fontBody, theme.textPrimary);
-        r.drawText("Phase 5 View Stack Demo", {380, 16}, theme.fontSmall, theme.accent);
-        r.drawLine({0, 45}, {640, 45}, theme.surfaceAlt);
+        r.fillRect({bounds_.x, bounds_.y, bounds_.w, 45}, theme.surface);
+        r.drawText("MAIN MENU (Base Screen)", {bounds_.x + 20, bounds_.y + 14}, theme.fontBody, theme.textPrimary);
+        r.drawText("Phase 5.5 View Stack Demo", {bounds_.x + 380, bounds_.y + 16}, theme.fontSmall, theme.accent);
+        r.drawLine({bounds_.x, bounds_.y + 45}, {bounds_.x + bounds_.w, bounds_.y + 45}, theme.surfaceAlt);
 
         // Status Card
-        hui::Rect statusRect{40, 55, 560, 35};
+        hui::Rect statusRect{bounds_.x + 40, bounds_.y + 55, bounds_.w - 80, 35};
         r.fillRect(statusRect, theme.surfaceAlt);
-        r.drawText(isDimmed() ? "Status: Obscured / Dimmed (Overlay active)" : "Status: Active / Focused Screen",
-                   {55, 65}, theme.fontSmall, isDimmed() ? theme.warning : theme.success);
+        r.drawText("Status: Active / Focused Screen",
+                   {bounds_.x + 55, bounds_.y + 65}, theme.fontSmall, theme.success);
 
         // Menu Buttons
-        int itemY = 100;
         for (size_t i = 0; i < buttons_.size(); ++i) {
-            hui::Rect itemRect{40, itemY, 560, 48};
-            buttons_[i]->draw(r, itemRect, theme);
-            itemY += 56;
+            buttons_[i]->draw(r, theme);
         }
 
         // Bottom Controls Hint Box
-        hui::Rect hintRect{40, 335, 560, 115};
+        hui::Rect hintRect{bounds_.x + 40, bounds_.y + 335, bounds_.w - 80, 115};
         r.fillRect(hintRect, theme.surface);
         r.drawRect(hintRect, theme.surfaceAlt, 1);
-        r.drawText("Controls:", {55, 345}, theme.fontBody, theme.textPrimary);
-        r.drawText("W / S / Up / Down: Move Focus", {55, 368}, theme.fontSmall, theme.textSecondary);
-        r.drawText("Space / Enter / Z / Button A: Select Focused Item", {55, 388}, theme.fontSmall, theme.textSecondary);
-        r.drawText("Escape / X / Button B: Quit / Back", {55, 408}, theme.fontSmall, theme.textSecondary);
+        r.drawText("Controls:", {bounds_.x + 55, bounds_.y + 345}, theme.fontBody, theme.textPrimary);
+        r.drawText("W / S / Up / Down: Move Focus", {bounds_.x + 55, bounds_.y + 368}, theme.fontSmall, theme.textSecondary);
+        r.drawText("Space / Enter / Z / Button A: Select Focused Item", {bounds_.x + 55, bounds_.y + 388}, theme.fontSmall, theme.textSecondary);
+        r.drawText("Escape / X / Button B: Quit / Back", {bounds_.x + 55, bounds_.y + 408}, theme.fontSmall, theme.textSecondary);
     }
 
     bool onButtonDown(hui::Button b, hui::FocusManager& fm) override {
@@ -421,7 +439,7 @@ int main(int argc, char* argv[]) {
     }
     renderer = std::make_unique<hui::SDL1Renderer>(screen);
 #else
-    SDL_Window* window = SDL_CreateWindow("LHCUI Phase 5 Interactive Demo",
+    SDL_Window* window = SDL_CreateWindow("LHCUI Phase 5.5 Interactive Demo",
                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                           640, 480, SDL_WINDOW_SHOWN);
     if (!window) {
@@ -477,11 +495,13 @@ int main(int argc, char* argv[]) {
     // FocusManager and ViewStack (bound together)
     hui::FocusManager focusManager;
     hui::ViewStack viewStack(&focusManager);
+    viewStack.setContentRect({0, 0, 640, 480});
     example::g_viewStack = &viewStack;
     example::g_running = true;
 
     // Push initial Base Screen
     viewStack.push(example::createMainMenuView());
+    viewStack.applyPendingMutations(focusManager);
 
     uint64_t lastTime = SDL_GetTicks();
 

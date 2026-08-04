@@ -36,6 +36,7 @@ hui_example
 build/
 build_sdl1/
 build_sdl2/
+build_*/
 CMakeCache.txt
 CMakeFiles/
 CMakeScripts/
