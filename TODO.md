@@ -1,8 +1,15 @@
 # Handheld UI Toolkit — Development Checklist
 
-Step-by-step implementation order. Use alongside `DESIGN.md`. Each phase should compile and be testable before moving to the next.
+Step-by-step implementation order. Use alongside `DESIGN.md` (revision 2). Each phase should compile and be testable before moving to the next.
 
 > **For the testing team:** every phase ends with a **QA Sign-off** block. Work through those items after the developer marks the phase complete, then check each box to confirm the phase is verified and ready to proceed.
+
+> **⚠ Revision 2 notice.** `DESIGN.md` revision 2 changed decisions that live inside Phases 4
+> and 5, which were already complete. The affected checkboxes have been **un-checked** and the
+> reason is noted inline as `↺ rev2`. Existing code does not match the current design document
+> until **Phase 5.5 — Revision 2 Retrofit** is done. Do that before Phase 6. See `MIGRATION.md`
+> for the full rationale and for the instruction on deleting these notices once the retrofit
+> is verified.
 
 ---
 
@@ -92,13 +99,22 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 ## Phase 4 — Widget Base Class & Focus Manager
 
 - [x] Implement `Widget` base class in `include/hui/Widget.h` (§6.1)
-  - [x] `update(float dt)`, `draw()`, `onButtonDown()`, `onButtonUp()` virtuals
+  - [x] `update(float dt)`, `onButtonDown()`, `onButtonUp()` virtuals
+  - [ ] ↺ rev2 — `virtual void layout(Rect r)` setting protected `bounds_`; `bounds()` accessor
+  - [ ] ↺ rev2 — `draw(IRenderer&, const Theme&)` **without** the `Rect` parameter; widgets draw inside `bounds_`
+  - [ ] ↺ rev2 — `virtual bool isFocusable() const` defaulting to `false`
   - [x] `onFocus()`, `onBlur()` virtuals; `isFocused()`, `isDisabled()`, `setDisabled()` accessors
-  - [x] Private `focused_` / `disabled_` fields; `setFocused()` befriended to `FocusManager`
+  - [x] Private `focused_` / `disabled_` fields
+  - [ ] ↺ rev2 — split the fused setter into `setFocusedFlag(bool)` (flag only) and `setFocusedAndNotify(bool)` (flag + callback), both befriended to `FocusManager`
 - [x] Implement `FocusManager` in `include/hui/FocusManager.h` (§7.1)
-  - [x] `setFocus(Widget*)`: calls `onBlur` on previous, `onFocus` on new
+  - [ ] ↺ rev2 — `setFocus(Widget*)` returns `bool` and **refuses** a non-null widget when `!isFocusable()` or `isDisabled()`, leaving focus unchanged; `setFocus(nullptr)` always succeeds
+  - [x] `setFocus`: calls `onBlur` on previous, `onFocus` on new; no-op if already focused
   - [x] `focused()`, `hasFocus()` accessors
-  - [x] `forceOwner(Widget*)`: sets current without lifecycle callbacks (used by ViewStack on resume)
+  - [ ] ↺ rev2 — `forceOwner(Widget*)`: updates the `focused_` flag on **both** the outgoing and incoming widget via `setFocusedFlag()` while skipping `onFocus`/`onBlur`; returns `bool`, same refusal rules as `setFocus`
+- [ ] ↺ rev2 — Implement `NavList` in `include/hui/NavList.h` (§7.3)
+  - [ ] `setAxis(Axis)`, `setWrap(bool)`, `add(Widget*)`, `clear()`
+  - [ ] `handleButton(Button, FocusManager&)`: consumes only the buttons on its axis; skips `!isFocusable()` and `isDisabled()` entries; wraps; returns `false` for off-axis buttons and for an empty list
+  - [ ] `focusIndex(int, FocusManager&)`, `index()`, `current()`
 
 ### ✅ QA Sign-off — Phase 4
 
@@ -106,8 +122,15 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 - [x] `setFocus(A)` followed by `setFocus(B)`: widget A receives exactly one `onBlur` call and widget B receives exactly one `onFocus` call
 - [x] Calling `setFocus` on the widget that already has focus does not fire `onBlur` or `onFocus` a second time
+- [ ] ↺ rev2 — `setFocus()` on a widget whose `isFocusable()` is `false` returns `false` and leaves `focused()` unchanged
+- [ ] ↺ rev2 — `setFocus()` on a widget with `setDisabled(true)` returns `false` and leaves `focused()` unchanged
+- [ ] ↺ rev2 — `layout({10,20,100,50})` then `bounds()` round-trips exactly; a widget that never had `layout()` called reports a zero rect rather than garbage
+- [ ] ↺ rev2 — `NavList` with `Axis::Vertical`: Down advances, Up retreats, both wrap; Left/Right return `false` and are left for the caller
+- [ ] ↺ rev2 — `NavList` with `Axis::Horizontal` and `setWrap(false)`: Right at the last entry returns `true` without moving (or `false`, whichever the implementation documents — the point is that it must not wrap)
+- [ ] ↺ rev2 — `NavList` skips a disabled middle entry entirely in both directions
+- [ ] ↺ rev2 — `NavList` with every entry disabled returns `false` and does not infinite-loop
 - [x] `setFocus(nullptr)` calls `onBlur` on the current owner and leaves `focused()` returning `nullptr`
-- [x] `forceOwner(W)` sets `focused()` to W without triggering `onBlur` or `onFocus` on any widget (instrument with a call counter)
+- [ ] ↺ rev2 — `forceOwner(W)` sets `focused()` to W and `W->isFocused()` to `true`, clears the previous owner's `isFocused()`, and fires **zero** `onFocus`/`onBlur` callbacks (instrument with a call counter). The flag update is the part the earlier revision got wrong — a widget restored via `forceOwner` must render highlighted.
 - [x] `isFocused()` returns `true` only while the widget is the current owner; returns `false` after it is blurred
 - [x] `setDisabled(true)` + `isDisabled()` round-trips correctly; `setDisabled(false)` restores the original state
 
@@ -119,18 +142,24 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
   - [x] Lifecycle hooks: `onPush()`, `onPop()`, `onResume()`, `onSuspend()`
   - [x] `update(float dt, FocusManager&)`, `draw(IRenderer&, const Theme&)` virtuals
   - [x] `onButtonDown()`, `onButtonUp()` virtuals returning `bool`
-  - [x] `setDimmed()` / `isDimmed()` and `dimmed_` protected field
+  - [ ] ↺ rev2 — **remove** `setDimmed()` / `isDimmed()` / `dimmed_`; replace with `virtual bool dimsBelow() const { return false; }`
+  - [ ] ↺ rev2 — `virtual void layout(Rect contentRect)` setting protected `bounds_`
   - [x] `currentHints()` returning `std::vector<HintEntry>`
-  - [x] `suspendFocus()` / `restoreFocus()` using `savedFocus_` pointer (§7.2)
+  - [x] `suspendFocus(FocusManager&)` recording `savedFocus_`
+  - [ ] ↺ rev2 — `suspendFocus()` must also call `fm.setFocus(nullptr)` so the outgoing widget receives `onBlur()`
+  - [ ] ↺ rev2 — make `restoreFocus(FocusManager&)` **virtual**; default implementation calls `fm.forceOwner(savedFocus_)`
 - [x] Implement `ViewStack` in `src/ViewStack.cpp` (§8.2)
-  - [x] `push()`: calls `onSuspend()` on previous top, then `onPush()` on new view; takes `unique_ptr` ownership
-  - [x] `pop()`: calls `onPop()`, then `onResume()` on the view below; no-op on a single-entry stack
+  - [ ] ↺ rev2 — `push()` / `pop()` / `popTo<T>()` / `replace()` **enqueue** a mutation instead of applying it immediately
+  - [ ] ↺ rev2 — `applyPendingMutations(FocusManager&)` returns `bool` (stack changed); runs the documented lifecycle order; calls `fm.setFocus(nullptr)` **before** destroying any view; calls `layout(contentRect_)` on a newly pushed view before its first update/draw
+  - [ ] ↺ rev2 — `hasPendingMutations()`
+  - [ ] ↺ rev2 — `setContentRect(Rect)` / `contentRect()`; setting it re-runs `layout()` on every stacked view
   - [x] `popTo<T>()` template: pops until the correct type is on top
   - [x] `replace()`: atomic pop+push
   - [x] `update()`: drives all views in the stack
-  - [x] `draw()`: renders bottom-to-top; applies `setGlobalAlpha(128)` to all non-top views when stack depth > 1, restores to 255 before the top view (§8.2)
+  - [ ] ↺ rev2 — `draw()`: renders bottom-to-top; before any view whose `dimsBelow()` is `true`, fills the **whole screen** once with `theme.overlay`. **Remove all `setGlobalAlpha` use from `ViewStack` entirely.**
   - [x] `dispatchButtonDown()` / `dispatchButtonUp()`: routes to `top()` only
-- [x] Provide optional `TransitionKind` enum and `SimpleTransition` helper struct (§8.4); not used by default `ViewStack`
+  - [ ] ↺ rev2 — `depth()` accessor
+- [ ] ↺ rev2 — **Delete** `TransitionKind` and `SimpleTransition` (§8.4). No consumer; speculative surface area. Move to the example app if it is ever actually wanted.
 
 ### ✅ QA Sign-off — Phase 5
 
@@ -140,8 +169,63 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 - [x] `pop()` while B is on top of A: B's `onPop` fires, then A's `onResume`; confirm call order
 - [x] `pop()` on a stack with exactly one view is a no-op: the view is not removed and no lifecycle hook fires
 - [x] `dispatchButtonDown` delivers the event only to the top view; a view below the top must not receive it (instrument both views)
-- [x] With two views on the stack, the non-top view is drawn with dimming applied; the top view is drawn at full alpha
-- [x] `suspendFocus()` records the focused widget; `restoreFocus()` returns focus to that exact widget via `forceOwner`
+- [ ] ↺ rev2 — With an ordinary (non-modal) view pushed on top, **nothing dims**: `grep` confirms `ViewStack` makes no `setGlobalAlpha` call, and the lower view renders at full brightness
+- [ ] ↺ rev2 — With a view whose `dimsBelow()` is `true` on top, exactly **one** full-screen `fillRect(theme.overlay)` is issued, immediately before that view is drawn (instrument the renderer and count calls)
+- [ ] ↺ rev2 — Stack depth 3 with two modal views: exactly two scrims, each immediately before its own view; no scrim before the base view
+- [x] `suspendFocus()` records the focused widget
+- [ ] ↺ rev2 — `suspendFocus()` also fires exactly one `onBlur()` on the outgoing widget and leaves `focused()` as `nullptr`
+- [ ] ↺ rev2 — `restoreFocus()` returns focus to that exact widget via `forceOwner`, and the widget's `isFocused()` is `true` afterwards
+- [ ] ↺ rev2 — A view that overrides `restoreFocus()` gets its override honoured instead of the `savedFocus_` default
+- [ ] ↺ rev2 — **Deferred pop safety:** a view that calls `pop()` from inside its own `onButtonDown` is not destroyed before that handler returns; the handler's return value is read correctly. Verify under a sanitizer build (ASan) — this is the use-after-free the deferral exists to prevent.
+- [ ] ↺ rev2 — After a pop, `focusManager().focused()` never points into the destroyed view; verify with ASan and with a pointer-identity check against the surviving view's widgets
+- [ ] ↺ rev2 — `push()` calls `layout(contentRect())` on the new view before its first `update()` or `draw()`; a view that asserts on a zero-sized `bounds_` in `draw()` does not fire
+- [ ] ↺ rev2 — `setContentRect()` with a new rect re-runs `layout()` on **every** view on the stack, not just the top
+
+---
+
+## Phase 5.5 — Revision 2 Retrofit
+
+> **Do this before Phase 6.** Phases 1–5 were implemented against revision 1 of `DESIGN.md`.
+> Revision 2 changed decisions inside Phases 4 and 5. This phase brings the existing code up
+> to the current document. It is small — mostly signatures and deletions — but every later
+> phase builds directly on top of it, so doing it now costs a fraction of doing it in Phase 12.
+>
+> All items here duplicate the `↺ rev2` boxes above; this phase is the ordered work list for
+> them. See `MIGRATION.md` for why each change was made.
+
+### Widget / Focus (Phase 4 surface)
+
+- [ ] Add `layout(Rect)` + protected `Rect bounds_` + `bounds()` to `Widget`
+- [ ] Change `Widget::draw()` to `draw(IRenderer&, const Theme&)`; update every existing override and call site
+- [ ] Add `virtual bool isFocusable() const { return false; }` to `Widget`
+- [ ] Split the fused focus setter into `setFocusedFlag()` and `setFocusedAndNotify()`
+- [ ] `FocusManager::setFocus()` returns `bool` and refuses non-focusable / disabled widgets
+- [ ] `FocusManager::forceOwner()` updates the `focused_` flag on both widgets, fires no callbacks, returns `bool`
+- [ ] Add `NavList` (new file)
+
+### View / ViewStack (Phase 5 surface)
+
+- [ ] Replace `View::setDimmed()` / `isDimmed()` / `dimmed_` with `virtual bool dimsBelow()`
+- [ ] Add `View::layout(Rect)` and protected `bounds_`
+- [ ] `View::suspendFocus()` now also clears focus via `fm.setFocus(nullptr)`
+- [ ] Make `View::restoreFocus()` virtual
+- [ ] Convert all four `ViewStack` mutators to enqueue; add `applyPendingMutations()` / `hasPendingMutations()`
+- [ ] Add `ViewStack::setContentRect()` / `contentRect()` / `depth()`
+- [ ] Rewrite `ViewStack::draw()` for scrim-based dimming; remove every `setGlobalAlpha` call from `ViewStack`
+- [ ] Delete `TransitionKind` and `SimpleTransition`, and their tests
+
+### Renderer (Phase 3 surface — no interface change)
+
+- [ ] Confirm the text measurement cache is keyed on **string content + font handle**, not on row index, slot, or y position (§13.1). If it is keyed on position, fix it now: smooth scrolling makes a position-keyed cache invalidate every frame and it will not be visible as a bug until the SDL1 target is profiled in Phase 15.
+
+### ✅ QA Sign-off — Phase 5.5
+
+- [ ] Both SDL1 and SDL2 configurations build clean at `-Wall -Wextra` after the retrofit
+- [ ] Every re-opened Phase 4 and Phase 5 QA item above is now checked
+- [ ] `grep -rn "setGlobalAlpha" src/ViewStack.cpp` returns nothing
+- [ ] `grep -rn "setDimmed\|isDimmed\|TransitionKind\|SimpleTransition" src/ include/hui/` returns nothing
+- [ ] ASan build: push and pop 200 views in a loop, with self-popping overlays, with no reported error
+- [ ] `MIGRATION.md` deleted and the `↺ rev2` markers plus the revision-2 notices removed from this file and from `DESIGN.md` (see the closing section of `MIGRATION.md`)
 
 ---
 
@@ -153,6 +237,12 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
   - [ ] Timing constants: `kInitialDelay = 0.3s`, `kRepeatInterval = 0.1s`, `kFastInterval = 0.03s`, `kFastThreshold = 1.0s`
   - [ ] `shouldRepeat()`: true for directional and shoulder buttons only; face buttons and Start/Select/Guide do not repeat
   - [ ] Synthetic events must set `ButtonEvent::synthetic = true`
+  - [ ] Synthetic `Down` **only** — never fabricate a matching `Up` (§9.2)
+  - [ ] `flushHeld()`: drops all held state without emitting anything
+- [ ] Implement `ChordDetector` in `src/ChordDetector.cpp` (§9.4)
+  - [ ] `addChord({Start, Select}, Guide)` as the default registration
+  - [ ] `onButtonDown` / `onButtonUp` return the substituted button, or the original when no chord completes
+  - [ ] `kChordWindow = 0.150f`; individual inputs are suppressed when the chord fires
 
 ### ✅ QA Sign-off — Phase 6
 
@@ -165,6 +255,11 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 - [ ] Releasing and immediately re-pressing a button resets the initial delay countdown from zero
 - [ ] Holding `Button::A`, `Button::B`, `Button::X`, `Button::Y`, `Button::Start`, `Button::Select`, and `Button::Guide` for 2 s produces zero synthetic repeat events for each
 - [ ] Every synthetic event has `ButtonEvent::synthetic == true`; real hardware events always have `synthetic == false`
+- [ ] No synthetic `ButtonEventKind::Up` is ever emitted, for any button, under any hold duration
+- [ ] `flushHeld()` while `Down` is held stops all further repeats; a subsequent real `Up` for that button is harmless (no crash, no spurious event)
+- [ ] Pressing Start then Select within 150 ms emits a single `Button::Guide` and **neither** `Start` nor `Select` individually
+- [ ] Pressing Start alone and waiting past the window emits `Start` (delayed by at most `kChordWindow`), not `Guide`
+- [ ] `update()` with a `dt` of 1200.0 s (simulating a wake from screen-off) emits **at most a handful** of repeats, not tens of thousands — verify the `UISystem` clamp is in the path (§10.1)
 
 ---
 
@@ -178,6 +273,11 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
   - [ ] `draw()`: calls `ViewStack::draw()`
   - [ ] `viewStack()` and `focusManager()` accessors
   - [ ] `setAnimationsEnabled(bool)` (§13.6); propagated to views/widgets that animate
+  - [ ] Clamp incoming `elapsedSeconds` to `kMaxDelta = 0.100f` before anything downstream sees it (§10.1)
+  - [ ] Call `ViewStack::applyPendingMutations()` at the top of `update()` **and** again after event dispatch unwinds; call `KeyRepeatDriver::flushHeld()` whenever it reports a change
+  - [ ] Route input through `ChordDetector` before `KeyRepeatDriver` (§9.4)
+  - [ ] `setSuspended(bool)` / `isSuspended()` (§10.1): first `draw()` after suspending clears to black and presents, subsequent `draw()` calls are no-ops; `onButtonDown` records held state but does not dispatch; `flushHeld()` on both suspend and resume
+  - [ ] `setShell(Shell*)` / `shell()`; `draw()` order is chrome → view stack → Shell overlay layer (§12)
 
 ### ✅ QA Sign-off — Phase 7
 
@@ -188,6 +288,13 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 - [ ] `onButtonUp` stops all repeats for the released button; no further synthetic events arrive in subsequent `update()` calls
 - [ ] `setAnimationsEnabled(false)` is confirmed to propagate: a `GuideOverlayView` stub (or the real one if already implemented) opens instantly instead of animating
 - [ ] Two independent `UISystem` instances can be driven simultaneously without sharing state; driving one does not affect the other
+- [ ] `update(1200.0f)` produces the same observable behaviour as `update(0.1f)`: confirm the clamp with an instrumented `KeyRepeatDriver` sink and count the synthetic events
+- [ ] A view that calls `viewStack().pop()` from `onButtonDown` is destroyed during the *following* `applyPendingMutations()`, not inside the handler
+- [ ] A synthetic repeat that triggers a push is applied before `ViewStack::update()` runs in that same frame
+- [ ] Holding `Button::Down`, then pushing an overlay: the overlay receives **zero** synthetic repeats from the still-held button
+- [ ] `setSuspended(true)`: the first `draw()` issues a black clear plus present; the next ten `draw()` calls issue no renderer commands at all (instrument the renderer)
+- [ ] While suspended, `onButtonDown(Button::A)` does not reach the top view; after `setSuspended(false)` the next press does
+- [ ] With no `Shell` registered (`setShell(nullptr)`), `draw()` works and draws only the view stack
 
 ---
 
@@ -242,10 +349,16 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 Implement each as a concrete `Widget` subclass. Verify each draws correctly in the example app before moving on.
 
+- [ ] Define `ListItemVariant`, `RowData`, and the `IListSource` interface in `include/hui/ListSource.h` (§6.5)
+- [ ] Implement `VectorListSource` — owning convenience adapter for short static lists (context menu, guide items) (§6.5)
 - [ ] `ListItemWidget` — single row: icon, primary label (`drawTextEllipsis`), secondary label, right meta; states: default / focused / playing / disabled; variants: default, track, folder, playlist (§12)
+  - [ ] `setRow(const RowData&)` and `setRowFocused(bool)` — this widget is a **stamp**: one instance is reused for every visible row by the owning container, so it must hold no per-row state beyond what `setRow` assigns (§6.2, §6.5)
+  - [ ] `isFocusable()` returns `false` — the row highlight is driven by the container, not by `FocusManager`
 - [ ] `GridCellWidget` — tile: thumbnail texture or gradient placeholder (using `hueToColor` + `labelHash`), label, sublabel; focused border; playing badge (§12, §13.2)
+  - [ ] Same stamp contract as `ListItemWidget`
 - [ ] `ProgressBar` — read-only horizontal fill bar; elapsed and total timestamp labels (§12)
 - [ ] `Slider` — focusable horizontal value control; Left/Right buttons change value; calls `onValueChanged` callback (§12)
+  - [ ] `isFocusable()` returns `true`; step size configurable (the guide overlay uses 5)
 - [ ] `SortModeIndicator` — non-focusable badge; renders current sort mode label (§12)
 - [ ] `ShuffleToggle` — non-focusable icon; on/off visual state (§12)
 - [ ] `RepeatModeToggle` — non-focusable icon; cycles off → all → one (§12)
@@ -265,6 +378,10 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 - [ ] `Slider` value increases on `Button::Right` and decreases on `Button::Left`; `onValueChanged` callback fires on each change
 - [ ] `Slider` does not respond to input when `setDisabled(true)`
 - [ ] `RepeatModeToggle` cycles through exactly three states (off → all → one → off) on successive activations; never skips or wraps incorrectly
+- [ ] `ListItemWidget` used as a stamp: calling `setRow()` / `layout()` / `draw()` twenty times in a row with different `RowData` produces twenty correct rows with **no** state leaking between them (e.g. a `playing` row does not leave the next row accent-colored)
+- [ ] `ListItemWidget` and `GridCellWidget` both report `isFocusable() == false`, so `FocusManager::setFocus()` on one is refused
+- [ ] `RowData` string views pointing into a caller-owned buffer render correctly, and the widget copies no strings (inspect for allocation — no `std::string` members holding row text)
+- [ ] `VectorListSource`: `add()` three entries, `rowCount() == 3`, `rowAt()` fills views that remain valid until `clear()`
 
 ---
 
@@ -296,22 +413,34 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 ## Phase 12 — Level 3 Organisms (Container Widgets & Overlay Views)
 
 - [ ] `ListView` — scrollable vertical list (§12)
+  - [ ] Backed by `IListSource*`, not by an owned item vector (§6.5)
+  - [ ] Owns **one** `ListItemWidget` stamp, refilled per visible row (§6.2)
+  - [ ] `layout()` computes `pageRows_ = max(1, bounds_.h / itemHeight_)` and reclamps scroll (§13.3)
+  - [ ] Draws **only the visible window** `[first, last]`, with a single `pushClip(bounds_)` for the whole viewport — not one clip per row (§6.2)
   - [ ] D-pad Up/Down moves focus; key-repeat consumed from `onButtonDown`
-  - [ ] L1/R1 page jump; L2/R2 jump to first/last item
-  - [ ] Wrap-around at top and bottom
-  - [ ] Scroll-to-focus using the bottom-third / top-third formula (§13.3)
-  - [ ] `getFocusIndex()` for focus memory; does not reset on `onBlur()`
+  - [ ] L1/R1 page jump by `pageRows_ * itemHeight_` (whole rows, no sub-row drift); L2/R2 jump to first/last item
+  - [ ] Wrap-around at top and bottom; wrap **snaps** the scroll offset rather than travelling through it (§13.3)
+  - [ ] Scroll-to-focus using the bottom-third / top-third formula, with `maxScroll = max(0, totalContentHeight - bounds_.h)` — the floor at 0 is required, not defensive (§13.3)
+  - [ ] `getFocusIndex()` / `setFocusIndex(int, bool scrollToIt)` for focus memory; does not reset on `onBlur()`
+  - [ ] `notifyRowsChanged()`: clamps focus index, reclamps scroll, invalidates the text measurement cache, does **not** move focus (§6.5.1)
+  - [ ] Scrolling does **not** invalidate the text cache (§13.1)
+  - [ ] `ListHeaderWidget` is pinned above the list, outside `bounds_` — the header does not scroll and is not row −1 (§13.3)
   - [ ] Empty state rendering (placeholder message)
   - [ ] Scroll indicator (right-side bar)
-- [ ] `GridView` — 2D focusable grid; same scroll / wrap / page / memory rules as `ListView` (§12)
+- [ ] `GridView` — 2D focusable grid; same source / stamp / window / scroll / wrap / page / memory rules as `ListView`, with a row of cells as the scroll unit (§12)
 - [ ] `TabBarWidget` — horizontal tab strip; L1/R1 to switch tabs; not reachable via D-pad Up/Down; calls `onTabChanged` callback (§12)
 - [ ] `QueueList` — extends `ListView` with grab-mode reorder: Y to grab, Up/Down to reorder, A to drop, B to cancel (§12)
 - [ ] `LetterWheel` — character strip + results list; internal focus routing between strip and list (§12)
 - [ ] `OnScreenKeyboard` — 2D QWERTY grid widget; Confirm / Cancel / Backspace keys; `onCommit` and `onCancel` callbacks (§12)
-- [ ] `ContextMenuView` — overlay `View`; semi-transparent background fill (`theme.overlay`); action list with destructive color support; B cancels (§12)
-- [ ] `ConfirmationDialogView` — overlay `View`; default focus on Cancel; Left/Right switches between Cancel and Confirm; A confirms, B cancels (§12)
+> **All four overlays below:** `dimsBelow()` returns `true`, and none of them draws its own
+> full-screen fill — `ViewStack` lays down the single scrim (§8.2, §8.3). Drawing both
+> double-darkens the background. Each pops itself from its own handler, which is safe only
+> because `ViewStack` mutations are deferred (§8.2).
+
+- [ ] `ContextMenuView` — overlay `View`; backed by a `VectorListSource`; action list with destructive color support; B cancels (§12)
+- [ ] `ConfirmationDialogView` — overlay `View`; `NavList` with `Axis::Horizontal`, wrap off, default index 0 (Cancel); A activates the focused option, B cancels from either (§12, §7.3)
 - [ ] `TrackInfoPanelView` — overlay `View`; read-only metadata table (§12)
-- [ ] `GuideOverlayView` — overlay `View` sliding in from right; contains `Slider` widgets for volume and brightness, plus action items; animation degrades to instant on SDL1 when `setAnimationsEnabled(false)` (§12, §13.6)
+- [ ] `GuideOverlayView` — overlay `View` sliding in from right; `NavList` with `Axis::Vertical` over both `Slider`s and the action items as one unified focus list; Left/Right falls through `NavList` to the focused `Slider` and is ignored on action items; animation degrades to instant when `setAnimationsEnabled(false)` (§12, §7.3, §13.6)
 
 ### ✅ QA Sign-off — Phase 12
 
@@ -327,6 +456,13 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 - [ ] `QueueList` grab mode: press Y to grab an item; Up/Down reorders it; A drops it in the new position; B cancels and the item returns to its original index
 - [ ] `ContextMenuView` shows the overlay background fill and the action list; pressing B dismisses it; a destructive action renders in `theme.warning` color
 - [ ] `ConfirmationDialogView` opens with focus on Cancel; Left/Right moves focus between Cancel and Confirm; A on Confirm confirms; B cancels from either button
+- [ ] `ConfirmationDialogView` Left at Cancel and Right at Confirm do **not** wrap
+- [ ] `GuideOverlayView` Up/Down traverses sliders and action items as one list; Left/Right on a slider adjusts by 5; Left/Right on an action item does nothing and does not move focus
+- [ ] Each overlay draws no full-screen fill of its own: with one modal open, the instrumented renderer sees exactly **one** full-screen `fillRect`
+- [ ] `ListView` with 5,000 rows: the instrumented renderer sees at most `pageRows_ + 2` row draws per frame, and exactly one `pushClip`/`popClip` pair for the list body
+- [ ] `ListView` scrolling continuously for 5 s: the text measurement cache hit rate stays high (instrument it) — a rate near zero means the cache is keyed on position rather than content (§13.1)
+- [ ] `ListView` with a list shorter than the viewport: `scrollOffset_` stays 0 and no undefined-behaviour clamp occurs (build with UBSan)
+- [ ] `ListView` insert-while-suspended: focus index 7, insert a row at index 3, `notifyRowsChanged()` — focus stays at index 7 (now a different row) and nothing crashes; `setFocusIndex(3)` then highlights the inserted row
 - [ ] `GuideOverlayView` slides in from the right under SDL2; with `setAnimationsEnabled(false)` it appears instantly with no intermediate animation frames
 - [ ] `OnScreenKeyboard` Backspace deletes the last typed character; Confirm calls `onCommit` with the full typed string; Cancel calls `onCancel` without modifying the string
 
@@ -334,8 +470,15 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 
 ## Phase 13 — Level 4 Screens (Application Views)
 
-- [ ] `Shell` — permanent wrapper `View`: owns `StatusBarWidget`, `HintBarWidget`, optional `TabBarWidget`; computes and exposes the content area `Rect` for page views (§12)
-- [ ] `DirectoryView` — uses `ListView` + `ListHeaderWidget`; pushes `ContextMenuView`, `TrackInfoPanelView`, `ToastNotification` (§12)
+- [ ] `Shell` — permanent chrome. **A composite `Widget`, NOT a `View`, and never pushed onto the ViewStack** (§12)
+  - [ ] Owns `StatusBarWidget`, `HintBarWidget`, optional `TabBarWidget`, and the `ToastNotification`
+  - [ ] Holds a `ViewStack&`; the hint bar reads `top()->currentHints()` each frame (§13.4)
+  - [ ] `layout(Rect screen)` partitions the chrome, computes `contentRect_`, and calls `stack_.setContentRect(contentRect_)`
+  - [ ] `drawChrome()` — drawn **beneath** the view stack so a modal scrim covers it
+  - [ ] `drawOverlay()` — the toast, drawn **above** everything and never dimmed
+  - [ ] `showToast(std::string_view, float seconds)`; replacement policy, no stacking
+- [ ] `DirectoryView` — uses `ListView` + pinned `ListHeaderWidget`; pushes `ContextMenuView` and `TrackInfoPanelView`; raises toasts via `Shell::showToast()` (the toast is **not** pushed onto the stack) (§12)
+  - [ ] Provides an `IListSource` over the application's directory listing; copies no row strings (§6.5)
 - [ ] `LibraryView` — uses `ListView` + `GridView` + `TabBarWidget`; pushes `ContextMenuView`, `LetterWheel`, `TrackInfoPanelView` (§12)
 - [ ] `NowPlayingView` — uses `SeekableProgressBar`, `PlaybackControlsRow`, `QueueList`; pushes `ContextMenuView`, `TrackInfoPanelView` (§12)
 
@@ -344,6 +487,11 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 > **Testing team:** confirm all items below before marking this phase done.
 
 - [ ] `Shell` content area rect does not overlap the `StatusBarWidget` (top) or `HintBarWidget` (bottom) under any screen resolution; verify at both 480×320 and 640×480
+- [ ] `Shell::layout()` propagates the content rect through `ViewStack::setContentRect()` to every stacked view
+- [ ] During ordinary navigation (no modal open) the status bar and hint bar are at **full brightness** — confirm the regression that motivated moving `Shell` off the stack is gone
+- [ ] With a `ConfirmationDialogView` open, the status bar and hint bar **are** dimmed along with the content, and the toast (if visible) is **not**
+- [ ] `HintBarWidget` caps at five hints, truncating from the middle, with A and B always retained (§13.4)
+- [ ] `HintBarWidget` renders hints in the mandated order regardless of the order the view returns them in
 - [ ] `HintBarWidget` displays the overlay's hints (not the base view's) immediately after a `ContextMenuView` is pushed onto the stack
 - [ ] `HintBarWidget` reverts to the base view's hints immediately after the overlay is popped
 - [ ] `DirectoryView`: open context menu, press B to cancel, confirm focus returns to the exact list item that was focused before the menu opened
@@ -388,6 +536,8 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 - [ ] Profile on the A53 SDL1 target (or emulate): confirm full-frame blit budget, no per-frame string re-rendering (§13.6)
 - [ ] Verify no SDL headers are included from any file in `include/hui/` (only `src/renderer/` touches SDL)
 - [ ] Verify no `dynamic_cast`, no RTTI usage, no exceptions thrown anywhere in the library (§13.8)
+- [ ] Confirm `MIGRATION.md` has been deleted and no `↺ rev2` marker remains in this file or in `DESIGN.md`
+- [ ] Confirm no allocation occurs per frame during list scrolling (hook the allocator and scroll a 5,000-row list for 10 s)
 - [ ] Check all fallible methods return `bool` or `std::optional`; no silent failure paths
 
 ### ✅ QA Sign-off — Phase 15
