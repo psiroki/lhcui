@@ -260,29 +260,30 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 ## Phase 8 — SDL Helper Layer
 
-- [ ] Define `ButtonMapping` struct in `include/hui/sdl/ButtonMapping.h` (§11.1)
-  - [ ] `controllerButtons` array: SDL button index → `std::optional<Button>`
-  - [ ] `AxisBinding` struct: axis, positive button, negative button, threshold
-  - [ ] `axisBindings` vector
-  - [ ] `defaultXboxLayout()` and `defaultNintendoLayout()` static factories
-  - [ ] `buttonFromName(std::string_view)` free function for config-file parsing
-- [ ] Implement `SDLGamepadHelper` in `src/sdl/SDLGamepadHelper.cpp` (§11.2)
-  - [ ] `openController(int deviceIndex)` / `closeController()`
-  - [ ] `translate(const SDL_Event&)` → `std::optional<ButtonEvent>`; handles `SDL_CONTROLLERBUTTONDOWN/UP`, `SDL_CONTROLLERAXISMOTION` with hysteresis
-- [ ] Implement keyboard fallback connector in `src/sdl/KeyboardFallback.cpp` (§11, §12), guarded by `HUI_ENABLE_KEYBOARD_FALLBACK`
-  - [ ] Arrow keys → D-pad, Z/X → A/B (or similar); document the mapping
+- [x] Define `ButtonMapping` struct in `include/hui/sdl/ButtonMapping.h` (§11.1)
+  - [x] `controllerButtons` array: SDL button index → `std::optional<Button>`
+  - [x] `AxisBinding` struct: axis, positive button, negative button, threshold
+  - [x] `axisBindings` vector
+  - [x] `defaultXboxLayout()` and `defaultNintendoLayout()` static factories
+  - [x] `buttonFromName(std::string_view)` free function for config-file parsing
+- [x] Implement `SDLGamepadHelper` in `src/sdl/SDLGamepadHelper.cpp` (§11.2)
+  - [x] `openController(int deviceIndex)` / `closeController()`
+  - [x] `translate(const SDL_Event&)` → `std::optional<ButtonEvent>`; handles `SDL_CONTROLLERBUTTONDOWN/UP`, `SDL_CONTROLLERAXISMOTION` with hysteresis
+- [x] Implement keyboard fallback connector in `src/sdl/KeyboardFallback.cpp` (§11, §12), guarded by `HUI_ENABLE_KEYBOARD_FALLBACK`
+  - [x] Arrow keys → D-pad, Z/X → A/B (or similar); document the mapping
 
 ### ✅ QA Sign-off — Phase 8
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `defaultXboxLayout()`: verify A, B, X, Y, D-pad Up/Down/Left/Right, L1, L2, R1, R2, Start, Select, Guide each map to the correct `hui::Button` (check against documented SDL controller button indices)
-- [ ] `defaultNintendoLayout()`: verify A and B are swapped relative to the Xbox layout; all other buttons identical
-- [ ] Axis binding: synthesise an `SDL_CONTROLLERAXISMOTION` event with value `+20000` (above the 16384 threshold); confirm the positive `hui::Button` fires
-- [ ] Axis hysteresis: synthesise a second event at `+20000` without crossing back through zero; confirm no second `ButtonEvent` is emitted
-- [ ] Axis release: synthesise an event at `+100` (below threshold) after a positive trigger; confirm the corresponding `ButtonUp` fires
-- [ ] `buttonFromName("Up")` → `Button::Up`; `buttonFromName("L2")` → `Button::L2`; an unknown name returns a defined error state (nullopt or assertion)
-- [ ] Keyboard fallback (build with `HUI_ENABLE_KEYBOARD_FALLBACK=ON`): press each mapped key and confirm the correct `hui::Button` event is delivered; confirm the full mapping is documented in a comment or README section
+- [x] `defaultXboxLayout()`: verify A, B, X, Y, D-pad Up/Down/Left/Right, L1, L2, R1, R2, Start, Select, Guide each map to the correct `hui::Button` (check against documented SDL controller button indices)
+- [x] `defaultNintendoLayout()`: verify A and B are swapped relative to the Xbox layout, X and Y as well (if they are used); all other buttons identical
+- [x] Axis binding: synthesise an `SDL_CONTROLLERAXISMOTION` event with value `+20000` (above the 16384 threshold); confirm the positive `hui::Button` fires
+- [x] Axis hysteresis: synthesise a second event at `+20000` without crossing back through zero; confirm no second `ButtonEvent` is emitted
+- [x] Axis release: synthesise an event at `+100` (below threshold) after a positive trigger; confirm the corresponding `ButtonUp` fires
+- [x] `buttonFromName("Up")` → `Button::Up`; `buttonFromName("L2")` → `Button::L2`; an unknown name returns a defined error state (nullopt or assertion)
+- [x] Keyboard fallback (build with `HUI_ENABLE_KEYBOARD_FALLBACK=ON`): press each mapped key and confirm the correct `hui::Button` event is delivered; confirm the full mapping is documented in a comment or README section
+
 
 ---
 

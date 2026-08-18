@@ -20,7 +20,17 @@ endif()
 option(HUI_ENABLE_KEYBOARD_FALLBACK "Enable keyboard fallback" ${FALLBACK_DEFAULT})
 
 # hui (static library)
-add_library(hui STATIC src/renderer/SDL1Renderer.cpp src/renderer/SDL2Renderer.cpp src/ViewStack.cpp src/KeyRepeatDriver.cpp src/ChordDetector.cpp src/UISystem.cpp)
+add_library(hui STATIC
+    src/renderer/SDL1Renderer.cpp
+    src/renderer/SDL2Renderer.cpp
+    src/ViewStack.cpp
+    src/KeyRepeatDriver.cpp
+    src/ChordDetector.cpp
+    src/UISystem.cpp
+    src/sdl/ButtonMapping.cpp
+    src/sdl/SDLGamepadHelper.cpp
+    src/sdl/KeyboardFallback.cpp
+)
 
 target_include_directories(hui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
 target_compile_options(hui PRIVATE -Wall -Wextra)
@@ -47,9 +57,18 @@ target_compile_options(hui_example PRIVATE -Wall -Wextra ${SDL_CFLAGS})
 # Testing
 enable_testing()
 
-add_executable(hui_tests tests/main.cpp tests/test_types.cpp tests/test_focus.cpp tests/test_view.cpp tests/test_input.cpp tests/test_uisystem.cpp)
-target_include_directories(hui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
-target_link_libraries(hui_tests PRIVATE hui)
-target_compile_options(hui_tests PRIVATE -Wall -Wextra)
+add_executable(hui_tests
+    tests/main.cpp
+    tests/test_types.cpp
+    tests/test_focus.cpp
+    tests/test_view.cpp
+    tests/test_input.cpp
+    tests/test_uisystem.cpp
+    tests/test_sdl.cpp
+)
+target_include_directories(hui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${SDL_INCLUDE_DIRS})
+target_link_libraries(hui_tests PRIVATE hui ${SDL_LDFLAGS})
+target_compile_options(hui_tests PRIVATE -Wall -Wextra ${SDL_CFLAGS})
 
 add_test(NAME CoreTypesTest COMMAND hui_tests)
+
