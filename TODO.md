@@ -289,20 +289,20 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 ## Phase 9 — Text & Rendering Helpers
 
-- [ ] Implement `leftTruncate(std::string_view, FontHandle, int maxWidth, IRenderer&)` free function returning `"…/rest/of/path"` (§13.1)
-- [ ] Implement `hueToColor(float hue)` (HSV S=0.5, V=0.7) and `labelHash(std::string_view)` helpers for gradient placeholders (§13.2)
-- [ ] Implement `buttonGlyphColor(std::string_view buttonLabel, const Theme&)` for hint bar color coding (§13.5)
+- [x] Implement `leftTruncate(std::string_view, FontHandle, int maxWidth, IRenderer&)` free function returning `"…/rest/of/path"` (§13.1)
+- [x] Implement `hueToColor(float hue)` (HSV S=0.5, V=0.7) and `labelHash(std::string_view)` helpers for gradient placeholders (§13.2)
+- [x] Implement `buttonGlyphColor(std::string_view buttonLabel, const Theme&)` for hint bar color coding (§13.5)
 
 ### ✅ QA Sign-off — Phase 9
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `leftTruncate` with a string that already fits within `maxWidth` returns it unchanged (no `…` prefix added)
-- [ ] `leftTruncate` with a long path (e.g. `/home/user/music/rock/album/track.flac`) returns a string beginning with `…/` whose rendered pixel width is ≤ `maxWidth`
-- [ ] `leftTruncate` result always preserves the rightmost path component intact (the filename is never cut mid-word)
-- [ ] `hueToColor(0.0f)` returns a recognisably red-tinted color; `hueToColor(0.33f)` green; `hueToColor(0.67f)` blue
-- [ ] `labelHash("alpha") != labelHash("beta")` and `labelHash("alpha") == labelHash("alpha")` (deterministic, not trivially constant)
-- [ ] `buttonGlyphColor("A", theme)` → `{220,50,50,255}`; `"B"` → `{220,160,40,255}`; `"X"` → `{60,120,220,255}`; `"Y"` → `{60,180,80,255}`; any other string → `theme.textSecondary`
+- [x] `leftTruncate` with a string that already fits within `maxWidth` returns it unchanged (no `…` prefix added)
+- [x] `leftTruncate` with a long path (e.g. `/home/user/music/rock/album/track.flac`) returns a string beginning with `…/` whose rendered pixel width is ≤ `maxWidth`
+- [x] `leftTruncate` result always preserves the rightmost path component intact (the filename is never cut mid-word)
+- [x] `hueToColor(0.0f)` returns a recognisably red-tinted color; `hueToColor(0.33f)` green; `hueToColor(0.67f)` blue
+- [x] `labelHash("alpha") != labelHash("beta")` and `labelHash("alpha") == labelHash("alpha")` (deterministic, not trivially constant)
+- [x] `buttonGlyphColor("A", theme)` → `{220,50,50,255}`; `"B"` → `{220,160,40,255}`; `"X"` → `{60,120,220,255}`; `"Y"` → `{60,180,80,255}`; any other string → `theme.textSecondary`
 
 ---
 
