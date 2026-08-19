@@ -310,39 +310,39 @@ All in the `hui` namespace. No dependencies on SDL or the renderer.
 
 Implement each as a concrete `Widget` subclass. Verify each draws correctly in the example app before moving on.
 
-- [ ] Define `ListItemVariant`, `RowData`, and the `IListSource` interface in `include/hui/ListSource.h` (§6.5)
-- [ ] Implement `VectorListSource` — owning convenience adapter for short static lists (context menu, guide items) (§6.5)
-- [ ] `ListItemWidget` — single row: icon, primary label (`drawTextEllipsis`), secondary label, right meta; states: default / focused / playing / disabled; variants: default, track, folder, playlist (§12)
-  - [ ] `setRow(const RowData&)` and `setRowFocused(bool)` — this widget is a **stamp**: one instance is reused for every visible row by the owning container, so it must hold no per-row state beyond what `setRow` assigns (§6.2, §6.5)
-  - [ ] `isFocusable()` returns `false` — the row highlight is driven by the container, not by `FocusManager`
-- [ ] `GridCellWidget` — tile: thumbnail texture or gradient placeholder (using `hueToColor` + `labelHash`), label, sublabel; focused border; playing badge (§12, §13.2)
-  - [ ] Same stamp contract as `ListItemWidget`
-- [ ] `ProgressBar` — read-only horizontal fill bar; elapsed and total timestamp labels (§12)
-- [ ] `Slider` — focusable horizontal value control; Left/Right buttons change value; calls `onValueChanged` callback (§12)
-  - [ ] `isFocusable()` returns `true`; step size configurable (the guide overlay uses 5)
-- [ ] `SortModeIndicator` — non-focusable badge; renders current sort mode label (§12)
-- [ ] `ShuffleToggle` — non-focusable icon; on/off visual state (§12)
-- [ ] `RepeatModeToggle` — non-focusable icon; cycles off → all → one (§12)
+- [x] Define `ListItemVariant`, `RowData`, and the `IListSource` interface in `include/hui/ListSource.h` (§6.5)
+- [x] Implement `VectorListSource` — owning convenience adapter for short static lists (context menu, guide items) (§6.5)
+- [x] `ListItemWidget` — single row: icon, primary label (`drawTextEllipsis`), secondary label, right meta; states: default / focused / playing / disabled; variants: default, track, folder, playlist (§12)
+  - [x] `setRow(const RowData&)` and `setRowFocused(bool)` — this widget is a **stamp**: one instance is reused for every visible row by the owning container, so it must hold no per-row state beyond what `setRow` assigns (§6.2, §6.5)
+  - [x] `isFocusable()` returns `false` — the row highlight is driven by the container, not by `FocusManager`
+- [x] `GridCellWidget` — tile: thumbnail texture or gradient placeholder (using `hueToColor` + `labelHash`), label, sublabel; focused border; playing badge (§12, §13.2)
+  - [x] Same stamp contract as `ListItemWidget`
+- [x] `ProgressBar` — read-only horizontal fill bar; elapsed and total timestamp labels (§12)
+- [x] `Slider` — focusable horizontal value control; Left/Right buttons change value; calls `onValueChanged` callback (§12)
+  - [x] `isFocusable()` returns `true`; step size configurable (the guide overlay uses 5)
+- [x] `SortModeIndicator` — non-focusable badge; renders current sort mode label (§12)
+- [x] `ShuffleToggle` — non-focusable icon; on/off visual state (§12)
+- [x] `RepeatModeToggle` — non-focusable icon; cycles off → all → one (§12)
 
 ### ✅ QA Sign-off — Phase 10
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `ListItemWidget` renders all four variants (default, track, folder, playlist) without visual corruption or crash
-- [ ] `ListItemWidget` focused state shows the focus border and accent fill tint
-- [ ] `ListItemWidget` disabled state renders the label in `theme.textDisabled` and does not respond to button events
-- [ ] `ListItemWidget` with a very long primary label truncates with `…` and does not overflow its bounding rect
-- [ ] `GridCellWidget` with a null texture handle renders a gradient placeholder (not a black tile, not a crash)
-- [ ] Two `GridCellWidget` instances with different label strings show visually distinct placeholder gradients
-- [ ] `GridCellWidget` focused state renders the focus border
-- [ ] `ProgressBar` at 0%, 50%, and 100% fill all render correctly; elapsed/total labels are visible and accurate
-- [ ] `Slider` value increases on `Button::Right` and decreases on `Button::Left`; `onValueChanged` callback fires on each change
-- [ ] `Slider` does not respond to input when `setDisabled(true)`
-- [ ] `RepeatModeToggle` cycles through exactly three states (off → all → one → off) on successive activations; never skips or wraps incorrectly
-- [ ] `ListItemWidget` used as a stamp: calling `setRow()` / `layout()` / `draw()` twenty times in a row with different `RowData` produces twenty correct rows with **no** state leaking between them (e.g. a `playing` row does not leave the next row accent-colored)
-- [ ] `ListItemWidget` and `GridCellWidget` both report `isFocusable() == false`, so `FocusManager::setFocus()` on one is refused
-- [ ] `RowData` string views pointing into a caller-owned buffer render correctly, and the widget copies no strings (inspect for allocation — no `std::string` members holding row text)
-- [ ] `VectorListSource`: `add()` three entries, `rowCount() == 3`, `rowAt()` fills views that remain valid until `clear()`
+- [x] `ListItemWidget` renders all four variants (default, track, folder, playlist) without visual corruption or crash
+- [x] `ListItemWidget` focused state shows the focus border and accent fill tint
+- [x] `ListItemWidget` disabled state renders the label in `theme.textDisabled` and does not respond to button events
+- [x] `ListItemWidget` with a very long primary label truncates with `…` and does not overflow its bounding rect
+- [x] `GridCellWidget` with a null texture handle renders a gradient placeholder (not a black tile, not a crash)
+- [x] Two `GridCellWidget` instances with different label strings show visually distinct placeholder gradients
+- [x] `GridCellWidget` focused state renders the focus border
+- [x] `ProgressBar` at 0%, 50%, and 100% fill all render correctly; elapsed/total labels are visible and accurate
+- [x] `Slider` value increases on `Button::Right` and decreases on `Button::Left`; `onValueChanged` callback fires on each change
+- [x] `Slider` does not respond to input when `setDisabled(true)`
+- [x] `RepeatModeToggle` cycles through exactly three states (off → all → one → off) on successive activations; never skips or wraps incorrectly
+- [x] `ListItemWidget` used as a stamp: calling `setRow()` / `layout()` / `draw()` twenty times in a row with different `RowData` produces twenty correct rows with **no** state leaking between them (e.g. a `playing` row does not leave the next row accent-colored)
+- [x] `ListItemWidget` and `GridCellWidget` both report `isFocusable() == false`, so `FocusManager::setFocus()` on one is refused
+- [x] `RowData` string views pointing into a caller-owned buffer render correctly, and the widget copies no strings (inspect for allocation — no `std::string` members holding row text)
+- [x] `VectorListSource`: `add()` three entries, `rowCount() == 3`, `rowAt()` fills views that remain valid until `clear()`
 
 ---
 

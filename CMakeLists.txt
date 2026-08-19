@@ -31,6 +31,14 @@ add_library(hui STATIC
     src/sdl/SDLGamepadHelper.cpp
     src/sdl/KeyboardFallback.cpp
     src/Helpers.cpp
+    src/ListSource.cpp
+    src/ListItemWidget.cpp
+    src/GridCellWidget.cpp
+    src/ProgressBar.cpp
+    src/Slider.cpp
+    src/SortModeIndicator.cpp
+    src/ShuffleToggle.cpp
+    src/RepeatModeToggle.cpp
 )
 
 target_include_directories(hui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -67,6 +75,7 @@ add_executable(hui_tests
     tests/test_uisystem.cpp
     tests/test_sdl.cpp
     tests/test_helpers.cpp
+    tests/test_atoms.cpp
 )
 target_include_directories(hui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${SDL_INCLUDE_DIRS})
 target_link_libraries(hui_tests PRIVATE hui ${SDL_LDFLAGS})
