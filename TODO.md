@@ -348,26 +348,26 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 
 ## Phase 11 — Level 2 Molecules (Widgets)
 
-- [ ] `ListHeaderWidget` — non-focusable context row: icon, label (left-truncated using `leftTruncate`), item count, sort badge (§12)
-- [ ] `SeekableProgressBar` — extends `ProgressBar`; consumes L2/R2 events; calls `onSeek` callback (§12)
-- [ ] `PlaybackControlsRow` — non-focusable row of transport icons reflecting playback state passed in (§12)
-- [ ] `HintBarWidget` — non-focusable bottom bar; reads `ViewStack::top()->currentHints()` each `draw()` call; renders button glyphs with `buttonGlyphColor()` (§12, §13.4, §13.5)
-- [ ] `StatusBarWidget` — non-focusable top bar: view mode label, context label, now-playing pulse indicator (animated via `update()`), clock, battery (§12)
-- [ ] `ToastNotification` — non-focusable; self-timed via `update()`; auto-dismiss with fade-out animation; replacement policy (new toast replaces old, no stacking) (§12, §6.4)
+- [x] `ListHeaderWidget` — non-focusable context row: icon, label (left-truncated using `leftTruncate`), item count, sort badge (§12)
+- [x] `SeekableProgressBar` — extends `ProgressBar`; consumes L2/R2 events; calls `onSeek` callback (§12)
+- [x] `PlaybackControlsRow` — non-focusable row of transport icons reflecting playback state passed in (§12)
+- [x] `HintBarWidget` — non-focusable bottom bar; reads `ViewStack::top()->currentHints()` each `draw()` call; renders button glyphs with `buttonGlyphColor()` (§12, §13.4, §13.5)
+- [x] `StatusBarWidget` — non-focusable top bar: view mode label, context label, now-playing pulse indicator (animated via `update()`), clock, battery (§12)
+- [x] `ToastNotification` — non-focusable; self-timed via `update()`; auto-dismiss with fade-out animation; replacement policy (new toast replaces old, no stacking) (§12, §6.4)
 
 ### ✅ QA Sign-off — Phase 11
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `ListHeaderWidget` with a long filesystem path renders a left-truncated label beginning with `…/` that does not overflow its bounds
-- [ ] `SeekableProgressBar` calls `onSeek` when L2 or R2 is pressed, and does not call it for any other button
-- [ ] `SeekableProgressBar` returns `false` from `onButtonDown` for non-seek buttons, allowing them to propagate
-- [ ] `HintBarWidget` renders face-button glyphs in the correct colors: A red, B yellow/orange, X blue, Y green
-- [ ] `HintBarWidget` non-button labels (e.g. `"L1/R1"`, `"START"`) render in `theme.textSecondary`
-- [ ] `StatusBarWidget` now-playing pulse indicator changes visual state across frames when `update(dt)` is driven with nonzero `dt`
-- [ ] `PlaybackControlsRow` visually reflects play, pause, and stop states when its playback-state input changes
-- [ ] `ToastNotification` auto-dismisses after its configured timeout; confirm with a timer that the widget is no longer drawing after the timeout elapses
-- [ ] Firing a second toast while the first is still visible replaces it immediately; only one toast is ever on screen at a time
+- [x] `ListHeaderWidget` with a long filesystem path renders a left-truncated label beginning with `…/` that does not overflow its bounds
+- [x] `SeekableProgressBar` calls `onSeek` when L2 or R2 is pressed, and does not call it for any other button
+- [x] `SeekableProgressBar` returns `false` from `onButtonDown` for non-seek buttons, allowing them to propagate
+- [x] `HintBarWidget` renders face-button glyphs in the correct colors: A red, B yellow/orange, X blue, Y green
+- [x] `HintBarWidget` non-button labels (e.g. `"L1/R1"`, `"START"`) render in `theme.textSecondary`
+- [x] `StatusBarWidget` now-playing pulse indicator changes visual state across frames when `update(dt)` is driven with nonzero `dt`
+- [x] `PlaybackControlsRow` visually reflects play, pause, and stop states when its playback-state input changes
+- [x] `ToastNotification` auto-dismisses after its configured timeout; confirm with a timer that the widget is no longer drawing after the timeout elapses
+- [x] Firing a second toast while the first is still visible replaces it immediately; only one toast is ever on screen at a time
 
 ---
 

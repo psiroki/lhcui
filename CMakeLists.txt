@@ -39,6 +39,12 @@ add_library(hui STATIC
     src/SortModeIndicator.cpp
     src/ShuffleToggle.cpp
     src/RepeatModeToggle.cpp
+    src/ListHeaderWidget.cpp
+    src/SeekableProgressBar.cpp
+    src/PlaybackControlsRow.cpp
+    src/HintBarWidget.cpp
+    src/StatusBarWidget.cpp
+    src/ToastNotification.cpp
 )
 
 target_include_directories(hui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -76,6 +82,7 @@ add_executable(hui_tests
     tests/test_sdl.cpp
     tests/test_helpers.cpp
     tests/test_atoms.cpp
+    tests/test_molecules.cpp
 )
 target_include_directories(hui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${SDL_INCLUDE_DIRS})
 target_link_libraries(hui_tests PRIVATE hui ${SDL_LDFLAGS})
