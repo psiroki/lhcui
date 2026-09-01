@@ -69,6 +69,10 @@ void UISystem::update(float elapsedSeconds) {
 
     // Update ViewStack
     viewStack_.update(dt, focusManager_);
+
+    if (shell_) {
+        shell_->update(dt);
+    }
 }
 
 void UISystem::draw() {

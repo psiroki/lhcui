@@ -55,6 +55,11 @@ add_library(hui STATIC
     src/ConfirmationDialogView.cpp
     src/TrackInfoPanelView.cpp
     src/GuideOverlayView.cpp
+    src/Shell.cpp
+    src/LetterWheelView.cpp
+    src/DirectoryView.cpp
+    src/LibraryView.cpp
+    src/NowPlayingView.cpp
 )
 
 target_include_directories(hui PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -94,6 +99,7 @@ add_executable(hui_tests
     tests/test_atoms.cpp
     tests/test_molecules.cpp
     tests/test_organisms.cpp
+    tests/test_screens.cpp
 )
 target_include_directories(hui_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests ${SDL_INCLUDE_DIRS})
 target_link_libraries(hui_tests PRIVATE hui ${SDL_LDFLAGS})

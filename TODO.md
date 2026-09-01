@@ -457,34 +457,34 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 
 ## Phase 13 — Level 4 Screens (Application Views)
 
-- [ ] `Shell` — permanent chrome. **A composite `Widget`, NOT a `View`, and never pushed onto the ViewStack** (§12)
-  - [ ] Owns `StatusBarWidget`, `HintBarWidget`, optional `TabBarWidget`, and the `ToastNotification`
-  - [ ] Holds a `ViewStack&`; the hint bar reads `top()->currentHints()` each frame (§13.4)
-  - [ ] `layout(Rect screen)` partitions the chrome, computes `contentRect_`, and calls `stack_.setContentRect(contentRect_)`
-  - [ ] `drawChrome()` — drawn **beneath** the view stack so a modal scrim covers it
-  - [ ] `drawOverlay()` — the toast, drawn **above** everything and never dimmed
-  - [ ] `showToast(std::string_view, float seconds)`; replacement policy, no stacking
-- [ ] `DirectoryView` — uses `ListView` + pinned `ListHeaderWidget`; pushes `ContextMenuView` and `TrackInfoPanelView`; raises toasts via `Shell::showToast()` (the toast is **not** pushed onto the stack) (§12)
-  - [ ] Provides an `IListSource` over the application's directory listing; copies no row strings (§6.5)
-- [ ] `LibraryView` — uses `ListView` + `GridView` + `TabBarWidget`; pushes `ContextMenuView`, `LetterWheel`, `TrackInfoPanelView` (§12)
-- [ ] `NowPlayingView` — uses `SeekableProgressBar`, `PlaybackControlsRow`, `QueueList`; pushes `ContextMenuView`, `TrackInfoPanelView` (§12)
+- [x] `Shell` — permanent chrome. **A composite `Widget`, NOT a `View`, and never pushed onto the ViewStack** (§12)
+  - [x] Owns `StatusBarWidget`, `HintBarWidget`, optional `TabBarWidget`, and the `ToastNotification`
+  - [x] Holds a `ViewStack&`; the hint bar reads `top()->currentHints()` each frame (§13.4)
+  - [x] `layout(Rect screen)` partitions the chrome, computes `contentRect_`, and calls `stack_.setContentRect(contentRect_)`
+  - [x] `drawChrome()` — drawn **beneath** the view stack so a modal scrim covers it
+  - [x] `drawOverlay()` — the toast, drawn **above** everything and never dimmed
+  - [x] `showToast(std::string_view, float seconds)`; replacement policy, no stacking
+- [x] `DirectoryView` — uses `ListView` + pinned `ListHeaderWidget`; pushes `ContextMenuView` and `TrackInfoPanelView`; raises toasts via `Shell::showToast()` (the toast is **not** pushed onto the stack) (§12)
+  - [x] Provides an `IListSource` over the application's directory listing; copies no row strings (§6.5)
+- [x] `LibraryView` — uses `ListView` + `GridView` + `TabBarWidget`; pushes `ContextMenuView`, `LetterWheel`, `TrackInfoPanelView` (§12)
+- [x] `NowPlayingView` — uses `SeekableProgressBar`, `PlaybackControlsRow`, `QueueList`; pushes `ContextMenuView`, `TrackInfoPanelView` (§12)
 
 ### ✅ QA Sign-off — Phase 13
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `Shell` content area rect does not overlap the `StatusBarWidget` (top) or `HintBarWidget` (bottom) under any screen resolution; verify at both 480×320 and 640×480
-- [ ] `Shell::layout()` propagates the content rect through `ViewStack::setContentRect()` to every stacked view
-- [ ] During ordinary navigation (no modal open) the status bar and hint bar are at **full brightness** — confirm the regression that motivated moving `Shell` off the stack is gone
-- [ ] With a `ConfirmationDialogView` open, the status bar and hint bar **are** dimmed along with the content, and the toast (if visible) is **not**
-- [ ] `HintBarWidget` caps at five hints, truncating from the middle, with A and B always retained (§13.4)
-- [ ] `HintBarWidget` renders hints in the mandated order regardless of the order the view returns them in
-- [ ] `HintBarWidget` displays the overlay's hints (not the base view's) immediately after a `ContextMenuView` is pushed onto the stack
-- [ ] `HintBarWidget` reverts to the base view's hints immediately after the overlay is popped
-- [ ] `DirectoryView`: open context menu, press B to cancel, confirm focus returns to the exact list item that was focused before the menu opened
-- [ ] `LibraryView`: L1/R1 switches between list and grid tabs; the content area updates to the correct widget and focus memory is preserved independently per tab
-- [ ] `NowPlayingView`: L2/R2 calls `onSeek`; `PlaybackControlsRow` visually updates when the playback state changes externally (simulated state change)
-- [ ] All three views handle an empty data set gracefully (no items in directory, no library tracks, empty queue) without crashing or showing corrupt layout
+- [x] `Shell` content area rect does not overlap the `StatusBarWidget` (top) or `HintBarWidget` (bottom) under any screen resolution; verify at both 480×320 and 640×480
+- [x] `Shell::layout()` propagates the content rect through `ViewStack::setContentRect()` to every stacked view
+- [x] During ordinary navigation (no modal open) the status bar and hint bar are at **full brightness** — confirm the regression that motivated moving `Shell` off the stack is gone
+- [x] With a `ConfirmationDialogView` open, the status bar and hint bar **are** dimmed along with the content, and the toast (if visible) is **not**
+- [x] `HintBarWidget` caps at five hints, truncating from the middle, with A and B always retained (§13.4)
+- [x] `HintBarWidget` renders hints in the mandated order regardless of the order the view returns them in
+- [x] `HintBarWidget` displays the overlay's hints (not the base view's) immediately after a `ContextMenuView` is pushed onto the stack
+- [x] `HintBarWidget` reverts to the base view's hints immediately after the overlay is popped
+- [x] `DirectoryView`: open context menu, press B to cancel, confirm focus returns to the exact list item that was focused before the menu opened
+- [x] `LibraryView`: L1/R1 switches between list and grid tabs; the content area updates to the correct widget and focus memory is preserved independently per tab
+- [x] `NowPlayingView`: L2/R2 calls `onSeek`; `PlaybackControlsRow` visually updates when the playback state changes externally (simulated state change)
+- [x] All three views handle an empty data set gracefully (no items in directory, no library tracks, empty queue) without crashing or showing corrupt layout
 
 ---
 
