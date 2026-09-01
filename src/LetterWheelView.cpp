@@ -16,10 +16,10 @@ void LetterWheelView::draw(IRenderer& renderer, const Theme& theme) {
 
 bool LetterWheelView::onButtonDown(Button b, FocusManager& fm) {
     if (b == Button::B) {
+        stack_.pop();
         if (onDismiss_) {
             onDismiss_();
         }
-        stack_.pop();
         return true;
     }
 

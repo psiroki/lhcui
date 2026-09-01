@@ -1,36 +1,24 @@
+// LHCUI example application (§14) — a mock gamepad music player.
+//
+// Demonstrates the three Level 4 screens (DirectoryView, LibraryView,
+// NowPlayingView) inside a Shell, driven by the global button map in
+// DESIGN.md §9.5. All data is mock; nothing touches the filesystem or audio.
+
 #include "hui/types.h"
 #include "hui/IRenderer.h"
-#include "hui/Widget.h"
-#include "hui/FocusManager.h"
-#include "hui/View.h"
-#include "hui/ViewStack.h"
 #include "hui/UISystem.h"
 #include "hui/ListSource.h"
-
-// Phase 10 Atoms
-#include "hui/ListItemWidget.h"
-#include "hui/GridCellWidget.h"
-#include "hui/ProgressBar.h"
-#include "hui/Slider.h"
-#include "hui/SortModeIndicator.h"
-#include "hui/ShuffleToggle.h"
-#include "hui/RepeatModeToggle.h"
-
-// Phase 11 Molecules
-#include "hui/ListHeaderWidget.h"
-#include "hui/SeekableProgressBar.h"
-#include "hui/PlaybackControlsRow.h"
-#include "hui/HintBarWidget.h"
-#include "hui/StatusBarWidget.h"
-#include "hui/ToastNotification.h"
-
-// Phase 12 Organisms
-#include "hui/ListView.h"
+#include "hui/Shell.h"
+#include "hui/DirectoryView.h"
+#include "hui/LibraryView.h"
+#include "hui/NowPlayingView.h"
 #include "hui/GuideOverlayView.h"
+#include "hui/TrackInfoPanelView.h"
 
 #ifdef HUI_ENABLE_KEYBOARD_FALLBACK
 #include "hui/sdl/KeyboardFallback.h"
 #endif
+#include "hui/sdl/SDLGamepadHelper.h"
 
 #ifdef HUI_USE_SDL1
 #include <SDL.h>
@@ -42,998 +30,956 @@
 #include "../src/renderer/SDL2Renderer.h"
 #endif
 
+#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <vector>
-#include <algorithm>
-#include <unordered_set>
-#include <sstream>
 
 namespace example {
 
-static hui::ViewStack* g_viewStack = nullptr;
-static hui::ToastNotification* g_toast = nullptr;
-static bool g_running = true;
-static int g_toastCounter = 1;
+// ---------------------------------------------------------------------------
+// Mock library data
+// ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Context Menu Overlay View (for verifying hint bar changes & modal dimming)
-// ---------------------------------------------------------------------------
-class DemoModalView : public hui::View {
+struct Track {
+    std::string title;
+    std::string artist;
+    std::string album;
+    std::string year;
+    std::string format;
+    std::string bitrate;
+    float       seconds = 0.0f;
+    std::string durationLabel;   // pre-rendered "m:ss"; RowData borrows it
+    bool        unsupported = false;
+};
+
+// One entry in a mock directory: either a subfolder or a track.
+struct DirEntry {
+    std::string name;
+    int         childDir = -1;   // index into Library::dirs when a folder
+    int         track    = -1;   // index into Library::tracks when a file
+};
+
+struct Directory {
+    std::string           path;
+    int                   parent = -1;
+    std::vector<DirEntry> entries;
+};
+
+struct Album {
+    std::string title;
+    std::string artist;
+    std::string year;
+};
+
+std::string formatTime(float seconds) {
+    int total = static_cast<int>(seconds + 0.5f);
+    int mins = total / 60;
+    int secs = total % 60;
+    std::string s = std::to_string(mins) + ":";
+    if (secs < 10) s += "0";
+    s += std::to_string(secs);
+    return s;
+}
+
+class Library {
 public:
-    HUI_VIEW_TYPE(DemoModalView)
+    Library() { build(); }
 
-    DemoModalView() {
-        options_ = {"1. Trigger Quick Toast", "2. Resume Playback", "3. Close Modal (Press B)"};
+    std::vector<Track>     tracks;
+    std::vector<Directory> dirs;
+    std::vector<Album>     albums;
+
+    int rootDir = 0;
+
+    int addTrack(std::string title, std::string artist, std::string album,
+                 std::string year, std::string format, std::string bitrate,
+                 float seconds, bool unsupported = false) {
+        Track t;
+        t.title = std::move(title);
+        t.artist = std::move(artist);
+        t.album = std::move(album);
+        t.year = std::move(year);
+        t.format = std::move(format);
+        t.bitrate = std::move(bitrate);
+        t.seconds = seconds;
+        t.durationLabel = formatTime(seconds);
+        t.unsupported = unsupported;
+        tracks.push_back(std::move(t));
+        return static_cast<int>(tracks.size()) - 1;
     }
 
-    bool dimsBelow() const override { return true; }
-
-    void layout(hui::Rect contentRect) override {
-        bounds_ = contentRect;
+    int addDir(std::string path, int parent) {
+        Directory d;
+        d.path = std::move(path);
+        d.parent = parent;
+        dirs.push_back(std::move(d));
+        return static_cast<int>(dirs.size()) - 1;
     }
 
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        hui::Rect modalRect{bounds_.x + (bounds_.w - 380) / 2, bounds_.y + (bounds_.h - 220) / 2, 380, 220};
-        r.fillRect(modalRect, theme.surface);
-        r.drawRect(modalRect, theme.accent, 2);
-
-        r.drawText("CONTEXT OPTIONS MODAL", {modalRect.x + 20, modalRect.y + 18}, theme.fontBody, theme.textPrimary);
-        r.drawText("Overlay active - Notice hint bar updated!", {modalRect.x + 20, modalRect.y + 40}, theme.fontSmall, theme.accent);
-        r.drawLine({modalRect.x, modalRect.y + 60}, {modalRect.x + modalRect.w, modalRect.y + 60}, theme.surfaceAlt);
-
-        int optY = modalRect.y + 75;
-        for (int i = 0; i < static_cast<int>(options_.size()); ++i) {
-            bool focused = (i == focusIndex_);
-            hui::Rect rowRect{modalRect.x + 16, optY, modalRect.w - 32, 34};
-            r.fillRect(rowRect, focused ? theme.focusFillColor : theme.surfaceAlt);
-            if (focused) {
-                r.drawRect(rowRect, theme.focusBorderColor, theme.focusBorderWidth);
-            }
-            r.drawText(options_[i], {rowRect.x + 12, rowRect.y + 8}, theme.fontSmall, focused ? theme.textPrimary : theme.textSecondary);
-            optY += 40;
-        }
-    }
-
-    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
-        if (b == hui::Button::Up) {
-            if (focusIndex_ > 0) --focusIndex_;
-            return true;
-        }
-        if (b == hui::Button::Down) {
-            if (focusIndex_ < static_cast<int>(options_.size()) - 1) ++focusIndex_;
-            return true;
-        }
-        if (b == hui::Button::A) {
-            if (focusIndex_ == 0 && g_toast) {
-                g_toast->show("Toast fired from modal!", 2.0f);
-            }
-            if (g_viewStack) g_viewStack->pop();
-            return true;
-        }
-        if (b == hui::Button::B) {
-            if (g_viewStack) g_viewStack->pop();
-            return true;
-        }
-        return false;
-    }
-
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {
-            {"A", "Select Action", false, 1},
-            {"B", "Dismiss Modal", false, 10}
-        };
-    }
+    int seedAlbumDir = 0;   // queue is primed from this folder
 
 private:
-    std::vector<std::string> options_;
-    int focusIndex_ = 0;
+    void build() {
+        rootDir = addDir("/music", -1);
+
+        const int autechre = addDir("/music/Autechre", rootDir);
+        const int triRepetae = addDir("/music/Autechre/Tri Repetae", autechre);
+        seedAlbumDir = triRepetae;
+        const int amber = addDir("/music/Autechre/Amber", autechre);
+        const int boc = addDir("/music/Boards of Canada", rootDir);
+        const int mhtrtc = addDir("/music/Boards of Canada/Music Has the Right to Children", boc);
+
+        dirs[rootDir].entries.push_back({"Autechre", autechre, -1});
+        dirs[rootDir].entries.push_back({"Boards of Canada", boc, -1});
+        // A file the mock decoder cannot read — exercises the disabled row state.
+        dirs[rootDir].entries.push_back(
+            {"field_recording.wv", -1,
+             addTrack("field_recording", "Unknown", "", "", "WavPack", "—", 214.0f, true)});
+
+        dirs[autechre].entries.push_back({"Tri Repetae", triRepetae, -1});
+        dirs[autechre].entries.push_back({"Amber", amber, -1});
+
+        albums.push_back({"Tri Repetae", "Autechre", "1995"});
+        albums.push_back({"Amber", "Autechre", "1994"});
+        albums.push_back({"Music Has the Right to Children", "Boards of Canada", "1998"});
+
+        struct Seed {
+            int         dir;
+            const char* title;
+            const char* artist;
+            const char* album;
+            const char* year;
+            float       seconds;
+        };
+
+        const Seed seeds[] = {
+            {triRepetae, "Dael",             "Autechre",          "Tri Repetae", "1995", 336.0f},
+            {triRepetae, "Clipper",          "Autechre",          "Tri Repetae", "1995", 425.0f},
+            {triRepetae, "Leterel",          "Autechre",          "Tri Repetae", "1995", 322.0f},
+            {triRepetae, "Rotar",            "Autechre",          "Tri Repetae", "1995", 359.0f},
+            {triRepetae, "Stud",             "Autechre",          "Tri Repetae", "1995", 291.0f},
+            {triRepetae, "Eutow",            "Autechre",          "Tri Repetae", "1995", 344.0f},
+            {triRepetae, "C/Pach",           "Autechre",          "Tri Repetae", "1995", 411.0f},
+            {triRepetae, "Overand",          "Autechre",          "Tri Repetae", "1995", 228.0f},
+            {triRepetae, "Rsdio",            "Autechre",          "Tri Repetae", "1995", 314.0f},
+            {amber,      "Foil",             "Autechre",          "Amber",       "1994", 383.0f},
+            {amber,      "Montreal",         "Autechre",          "Amber",       "1994", 340.0f},
+            {amber,      "Silverside",       "Autechre",          "Amber",       "1994", 305.0f},
+            {amber,      "Slip",             "Autechre",          "Amber",       "1994", 366.0f},
+            {mhtrtc,     "Wildlife Analysis","Boards of Canada",  "Music Has the Right to Children", "1998", 76.0f},
+            {mhtrtc,     "An Eagle in Your Mind", "Boards of Canada", "Music Has the Right to Children", "1998", 384.0f},
+            {mhtrtc,     "Telephasic Workshop",   "Boards of Canada", "Music Has the Right to Children", "1998", 386.0f},
+            {mhtrtc,     "Roygbiv",          "Boards of Canada",  "Music Has the Right to Children", "1998", 151.0f},
+            {mhtrtc,     "Aquarius",         "Boards of Canada",  "Music Has the Right to Children", "1998", 350.0f},
+        };
+
+        for (const Seed& s : seeds) {
+            const int idx = addTrack(s.title, s.artist, s.album, s.year, "FLAC", "1006 kbps", s.seconds);
+            std::string file = std::to_string(dirs[s.dir].entries.size() + 1);
+            if (file.size() < 2) file = "0" + file;
+            file += ". " + std::string(s.title) + ".flac";
+            dirs[s.dir].entries.push_back({std::move(file), -1, idx});
+        }
+
+        dirs[boc].entries.push_back({"Music Has the Right to Children", mhtrtc, -1});
+    }
 };
 
 // ---------------------------------------------------------------------------
-// Phase 12 QA — helpers and test views (manual sign-off harness)
+// Player state
 // ---------------------------------------------------------------------------
 
-class CountingListSource : public hui::IListSource {
+class Player {
 public:
-    explicit CountingListSource(int count) : count_(count) {
-        rows_.reserve(static_cast<size_t>(count));
-        for (int i = 0; i < count; ++i) {
-            rows_.push_back({"Row " + std::to_string(i), "Secondary " + std::to_string(i)});
-        }
+    std::vector<int> queue;        // track indices
+    int   current  = -1;           // index into queue
+    float elapsed  = 0.0f;
+    bool  playing  = false;
+    bool  shuffle  = false;
+    hui::RepeatMode repeat = hui::RepeatMode::Off;
+
+    int currentTrack() const {
+        if (current < 0 || current >= static_cast<int>(queue.size())) return -1;
+        return queue[current];
+    }
+};
+
+// ---------------------------------------------------------------------------
+// List sources over the application's own data (§6.5 — no row copies)
+// ---------------------------------------------------------------------------
+
+class DirectorySource : public hui::IListSource {
+public:
+    DirectorySource(const Library& lib, const Player& player) : lib_(lib), player_(player) {}
+
+    void setDirectory(int dir) { dir_ = dir; }
+    int  directory() const { return dir_; }
+
+    const DirEntry* entryAt(int index) const {
+        const auto& entries = lib_.dirs[dir_].entries;
+        if (index < 0 || index >= static_cast<int>(entries.size())) return nullptr;
+        return &entries[index];
     }
 
-    int rowCount() const override { return count_; }
+    int rowCount() const override {
+        return static_cast<int>(lib_.dirs[dir_].entries.size());
+    }
 
     void rowAt(int index, hui::RowData& out) const override {
-        ++rowAtCalls_;
-        const auto& row = rows_[static_cast<size_t>(index)];
-        out.primary = row.first;
-        out.secondary = row.second;
+        const DirEntry& e = lib_.dirs[dir_].entries[index];
+        out.primary = e.name;
+        if (e.childDir >= 0) {
+            out.variant = hui::ListItemVariant::Folder;
+            out.secondary = {};
+            out.rightMeta = {};
+            return;
+        }
+        const Track& t = lib_.tracks[e.track];
         out.variant = hui::ListItemVariant::Track;
+        out.secondary = t.artist;
+        out.rightMeta = t.durationLabel;
+        out.disabled = t.unsupported;
+        out.playing = (player_.currentTrack() == e.track);
     }
 
-    void resetRowAtCounter() { rowAtCalls_ = 0; }
-    int rowAtCalls() const { return rowAtCalls_; }
-
 private:
-    int count_;
-    mutable int rowAtCalls_ = 0;
-    std::vector<std::pair<std::string, std::string>> rows_;
+    const Library& lib_;
+    const Player&  player_;
+    int dir_ = 0;
 };
 
-class RendererProbe : public hui::IRenderer {
+class AllTracksSource : public hui::IListSource {
 public:
-    explicit RendererProbe(hui::IRenderer& inner) : inner_(inner) {}
+    AllTracksSource(const Library& lib, const Player& player) : lib_(lib), player_(player) {}
 
-    int pushClipCount = 0;
-    int popClipCount = 0;
-    int drawTextCalls = 0;
-    int drawTextCacheHits = 0;
+    int rowCount() const override { return static_cast<int>(lib_.tracks.size()); }
 
-    void resetFrameCounters() {
-        pushClipCount = 0;
-        popClipCount = 0;
+    void rowAt(int index, hui::RowData& out) const override {
+        const Track& t = lib_.tracks[index];
+        out.primary = t.title;
+        out.secondary = t.artist;
+        out.rightMeta = t.durationLabel;
+        out.variant = hui::ListItemVariant::Track;
+        out.disabled = t.unsupported;
+        out.playing = (player_.currentTrack() == index);
     }
-
-    void resetCacheStats() {
-        drawTextCalls = 0;
-        drawTextCacheHits = 0;
-        seenDrawKeys_.clear();
-    }
-
-    float cacheHitRate() const {
-        if (drawTextCalls == 0) {
-            return 0.0f;
-        }
-        return 100.0f * static_cast<float>(drawTextCacheHits) / static_cast<float>(drawTextCalls);
-    }
-
-    void beginFrame() override { inner_.beginFrame(); }
-    void endFrame() override { inner_.endFrame(); }
-
-    void pushClip(hui::Rect r) override {
-        ++pushClipCount;
-        inner_.pushClip(r);
-    }
-    void popClip() override {
-        ++popClipCount;
-        inner_.popClip();
-    }
-
-    void fillRect(hui::Rect r, hui::Color c) override { inner_.fillRect(r, c); }
-    void drawRect(hui::Rect r, hui::Color c, int thickness = 1) override {
-        inner_.drawRect(r, c, thickness);
-    }
-    void drawLine(hui::Point a, hui::Point b, hui::Color c) override { inner_.drawLine(a, b, c); }
-
-    int drawText(std::string_view text, hui::Point origin, hui::FontHandle font,
-                 hui::Color color) override {
-        ++drawTextCalls;
-        std::string key = std::string(text) + "|" + std::to_string(font) + "|" +
-                          std::to_string(color.r) + "," + std::to_string(color.g) + "," +
-                          std::to_string(color.b) + "," + std::to_string(color.a);
-        if (seenDrawKeys_.count(key) != 0) {
-            ++drawTextCacheHits;
-        } else {
-            seenDrawKeys_.insert(std::move(key));
-        }
-        return inner_.drawText(text, origin, font, color);
-    }
-
-    hui::Size measureText(std::string_view text, hui::FontHandle font) override {
-        return inner_.measureText(text, font);
-    }
-
-    void drawTextEllipsis(std::string_view text, hui::Point origin, hui::FontHandle font,
-                          hui::Color color, int maxWidth) override {
-        inner_.drawTextEllipsis(text, origin, font, color, maxWidth);
-    }
-
-    hui::TextureHandle loadTexture(std::string_view path) override { return inner_.loadTexture(path); }
-    void freeTexture(hui::TextureHandle h) override { inner_.freeTexture(h); }
-    hui::Size textureSize(hui::TextureHandle h) override { return inner_.textureSize(h); }
-    void drawTexture(hui::TextureHandle h, hui::Rect dst, uint8_t alpha = 255) override {
-        inner_.drawTexture(h, dst, alpha);
-    }
-    void setGlobalAlpha(uint8_t alpha) override { inner_.setGlobalAlpha(alpha); }
-    hui::Size screenSize() const override { return inner_.screenSize(); }
-    void invalidateTextCache() override { inner_.invalidateTextCache(); }
 
 private:
-    hui::IRenderer& inner_;
-    std::unordered_set<std::string> seenDrawKeys_;
+    const Library& lib_;
+    const Player&  player_;
 };
 
-static void drawParagraph(hui::IRenderer& r, const hui::Theme& theme, int x, int y, int maxW,
-                          std::string_view text, hui::Color color) {
-    std::istringstream stream{std::string(text)};
-    std::string line;
-    int lineH = 16;
-    while (std::getline(stream, line)) {
-        r.drawText(line, {x, y}, theme.fontSmall, color);
-        y += lineH;
-        (void)maxW;
-    }
-}
-
-static void drawBackHint(hui::IRenderer& r, const hui::Theme& theme, hui::Rect bounds) {
-    r.drawText("B: Back to menu", {bounds.x + 12, bounds.y + bounds.h - 22}, theme.fontSmall,
-               theme.textSecondary);
-}
-
-static void pushGuideOverlay(bool animationsEnabled) {
-    if (!g_viewStack) {
-        return;
-    }
-    auto guide = std::make_unique<hui::GuideOverlayView>(*g_viewStack, animationsEnabled);
-    guide->setOnEqualizer([]() {
-        if (g_toast) {
-            g_toast->show("Equalizer activated", 2.0f);
-        }
-    });
-    guide->setOnSettings([]() {
-        if (g_toast) {
-            g_toast->show("Settings activated", 2.0f);
-        }
-    });
-    guide->setOnClose([]() {
-        if (g_toast) {
-            g_toast->show("Guide closed", 1.5f);
-        }
-    });
-    g_viewStack->push(std::move(guide));
-}
-
-class GuideNavQATestView : public hui::View {
+class AlbumSource : public hui::IListSource {
 public:
-    HUI_VIEW_TYPE(GuideNavQATestView)
+    explicit AlbumSource(const Library& lib) : lib_(lib) {}
 
-    void layout(hui::Rect contentRect) override {
-        bounds_ = contentRect;
-        openBounds_ = {bounds_.x + 12, bounds_.y + bounds_.h - 64, bounds_.w - 24, 36};
-    }
+    int rowCount() const override { return static_cast<int>(lib_.albums.size()); }
 
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect(bounds_, theme.background);
-        r.drawText("Guide Overlay — Nav & Sliders", {bounds_.x + 12, bounds_.y + 8}, theme.fontBody,
-                   theme.accent);
-        drawParagraph(
-            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
-            "Open the guide. Verify:\n"
-            "• Up/Down traverses 2 sliders + 3 action items as one list\n"
-            "• Left/Right on a slider adjusts value by 5\n"
-            "• Left/Right on an action item does nothing (no focus move)",
-            theme.textSecondary);
-
-        bool focused = actionFocused_;
-        r.fillRect(openBounds_, focused ? theme.focusFillColor : theme.surface);
-        r.drawRect(openBounds_, focused ? theme.focusBorderColor : theme.surfaceAlt,
-                   focused ? theme.focusBorderWidth : 1);
-        r.drawText("Open Guide Overlay (A)", {openBounds_.x + 14, openBounds_.y + 10},
-                   theme.fontSmall, focused ? theme.textPrimary : theme.textSecondary);
-        drawBackHint(r, theme, bounds_);
-    }
-
-    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
-        if (b == hui::Button::B) {
-            if (g_viewStack) {
-                g_viewStack->pop();
-            }
-            return true;
-        }
-        if (b == hui::Button::A) {
-            if (actionFocused_) {
-                pushGuideOverlay(true);
-            }
-            return true;
-        }
-        return false;
-    }
-
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {{"A", "Open Guide", false, 1}, {"B", "Back", false, 10}};
+    void rowAt(int index, hui::RowData& out) const override {
+        const Album& a = lib_.albums[index];
+        out.primary = a.title;
+        out.secondary = a.artist;
+        out.rightMeta = a.year;
     }
 
 private:
-    hui::Rect openBounds_{0, 0, 0, 0};
-    bool actionFocused_ = true;
+    const Library& lib_;
 };
 
-class GuideAnimQATestView : public hui::View {
+class QueueSource : public hui::IListSource {
 public:
-    HUI_VIEW_TYPE(GuideAnimQATestView)
+    QueueSource(const Library& lib, const Player& player) : lib_(lib), player_(player) {}
 
-    void layout(hui::Rect contentRect) override {
-        bounds_ = contentRect;
-        int y = bounds_.y + bounds_.h - 110;
-        animatedBounds_ = {bounds_.x + 12, y, bounds_.w - 24, 36};
-        instantBounds_ = {bounds_.x + 12, y + 42, bounds_.w - 24, 36};
-    }
+    int rowCount() const override { return static_cast<int>(player_.queue.size()); }
 
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect(bounds_, theme.background);
-        r.drawText("Guide Overlay — Slide Animation", {bounds_.x + 12, bounds_.y + 8},
-                   theme.fontBody, theme.accent);
-        drawParagraph(
-            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
-            "SDL2: animated open should slide in from the right.\n"
-            "Instant open should appear with zero slide offset (no tween frames).",
-            theme.textSecondary);
-
-        auto drawBtn = [&](const hui::Rect& rect, bool sel, const char* label) {
-            r.fillRect(rect, sel ? theme.focusFillColor : theme.surface);
-            r.drawRect(rect, sel ? theme.focusBorderColor : theme.surfaceAlt,
-                       sel ? theme.focusBorderWidth : 1);
-            r.drawText(label, {rect.x + 14, rect.y + 10}, theme.fontSmall,
-                       sel ? theme.textPrimary : theme.textSecondary);
-        };
-        drawBtn(animatedBounds_, focusIndex_ == 0, "Open with slide animation (SDL2)");
-        drawBtn(instantBounds_, focusIndex_ == 1, "Open instant (animations disabled)");
-        drawBackHint(r, theme, bounds_);
-    }
-
-    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
-        if (b == hui::Button::Up && focusIndex_ > 0) {
-            --focusIndex_;
-            return true;
-        }
-        if (b == hui::Button::Down && focusIndex_ < 1) {
-            ++focusIndex_;
-            return true;
-        }
-        if (b == hui::Button::B) {
-            if (g_viewStack) {
-                g_viewStack->pop();
-            }
-            return true;
-        }
-        if (b == hui::Button::A && g_viewStack) {
-            pushGuideOverlay(focusIndex_ == 0);
-            return true;
-        }
-        return false;
-    }
-
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {{"A", "Open Guide", false, 1}, {"B", "Back", false, 10}};
+    void rowAt(int index, hui::RowData& out) const override {
+        const Track& t = lib_.tracks[player_.queue[index]];
+        out.primary = t.title;
+        out.secondary = t.album;
+        out.rightMeta = t.durationLabel;
+        out.variant = hui::ListItemVariant::Track;
+        out.playing = (index == player_.current);
     }
 
 private:
-    hui::Rect animatedBounds_{0, 0, 0, 0};
-    hui::Rect instantBounds_{0, 0, 0, 0};
-    int focusIndex_ = 0;
-};
-
-class ListWindowQATestView : public hui::View {
-public:
-    HUI_VIEW_TYPE(ListWindowQATestView)
-
-    ListWindowQATestView() : source_(5000) {
-        list_.setSource(&source_);
-        list_.layout({0, 0, 200, 200});
-    }
-
-    void layout(hui::Rect contentRect) override {
-        bounds_ = contentRect;
-        list_.layout({bounds_.x + 10, bounds_.y + 130, bounds_.w - 20, bounds_.h - 160});
-    }
-
-    void update(float, hui::FocusManager& fm) override {
-        if (fm.focused() != &list_) {
-            fm.setFocus(&list_);
-        }
-    }
-
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect(bounds_, theme.background);
-        r.drawText("ListView — 5,000 Row Windowing", {bounds_.x + 12, bounds_.y + 8}, theme.fontBody,
-                   theme.accent);
-        drawParagraph(
-            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
-            "Scroll with Up/Down. Each frame should draw at most pageRows+2 rows\n"
-            "and use exactly one pushClip/popClip pair for the list body.",
-            theme.textSecondary);
-
-        source_.resetRowAtCounter();
-        RendererProbe probe(r);
-        probe.resetFrameCounters();
-        list_.draw(probe, theme);
-
-        lastRowDraws_ = source_.rowAtCalls();
-        lastPushClip_ = probe.pushClipCount;
-        lastPopClip_ = probe.popClipCount;
-        const int maxRows = list_.pageRows() + 2;
-        pass_ = (lastRowDraws_ <= maxRows && lastPushClip_ == 1 && lastPopClip_ == 1);
-
-        std::ostringstream stats;
-        stats << "pageRows=" << list_.pageRows()
-              << "  row draws=" << lastRowDraws_ << " (max " << maxRows << ")"
-              << "  clip=" << lastPushClip_ << "/" << lastPopClip_
-              << "  => " << (pass_ ? "PASS" : "CHECK");
-        r.drawText(stats.str(), {bounds_.x + 12, bounds_.y + 108}, theme.fontSmall,
-                   pass_ ? theme.success : theme.warning);
-
-        drawBackHint(r, theme, bounds_);
-    }
-
-    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
-        if (b == hui::Button::B) {
-            if (g_viewStack) {
-                g_viewStack->pop();
-            }
-            return true;
-        }
-        return list_.onButtonDown(b);
-    }
-
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {{"Up/Down", "Scroll List", false, 2}, {"B", "Back", false, 10}};
-    }
-
-private:
-    CountingListSource source_;
-    hui::ListView list_{40};
-    int lastRowDraws_ = 0;
-    int lastPushClip_ = 0;
-    int lastPopClip_ = 0;
-    bool pass_ = false;
-};
-
-class ListCacheQATestView : public hui::View {
-public:
-    HUI_VIEW_TYPE(ListCacheQATestView)
-
-    ListCacheQATestView() : source_(5000) {
-        list_.setSource(&source_);
-    }
-
-    void layout(hui::Rect contentRect) override {
-        bounds_ = contentRect;
-        startBounds_ = {bounds_.x + 12, bounds_.y + bounds_.h - 64, bounds_.w - 24, 36};
-        list_.layout({bounds_.x + 10, bounds_.y + 130, bounds_.w - 20, bounds_.h - 160});
-    }
-
-    void update(float dt, hui::FocusManager& fm) override {
-        if (!running_ && fm.focused() != &list_) {
-            fm.setFocus(&list_);
-        }
-        if (!running_) {
-            return;
-        }
-
-        scrollTime_ += dt;
-        list_.onButtonDown(hui::Button::Down);
-
-        if (scrollTime_ >= 5.0f) {
-            running_ = false;
-            finished_ = true;
-        }
-    }
-
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect(bounds_, theme.background);
-        r.drawText("ListView — Scroll Text Cache (5 s)", {bounds_.x + 12, bounds_.y + 8},
-                   theme.fontBody, theme.accent);
-        drawParagraph(
-            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
-            "Press A to auto-scroll for 5 s. drawText cache hit rate should stay high\n"
-            "(near-zero means cache is keyed on position, not content).",
-            theme.textSecondary);
-
-        if (running_ || finished_) {
-            std::ostringstream line;
-            const float hitRate = (drawTextCalls_ > 0)
-                ? (100.0f * static_cast<float>(drawTextCacheHits_) /
-                   static_cast<float>(drawTextCalls_))
-                : 0.0f;
-            line << "Elapsed: " << static_cast<int>(scrollTime_) << "s / 5s"
-                 << "  drawText hits: " << drawTextCacheHits_ << " / " << drawTextCalls_
-                 << " (" << static_cast<int>(hitRate) << "%)";
-            r.drawText(line.str(), {bounds_.x + 12, bounds_.y + 108}, theme.fontSmall,
-                       theme.textPrimary);
-            if (finished_) {
-                const bool pass = hitRate >= 50.0f;
-                r.drawText(pass ? "PASS — cache hit rate healthy" : "CHECK — hit rate low",
-                           {bounds_.x + 12, bounds_.y + 124}, theme.fontSmall,
-                           pass ? theme.success : theme.warning);
-            }
-        }
-
-        if (running_ || finished_) {
-            if (!probe_) {
-                probe_ = std::make_unique<RendererProbe>(r);
-            }
-            list_.draw(*probe_, theme);
-            drawTextCalls_ = probe_->drawTextCalls;
-            drawTextCacheHits_ = probe_->drawTextCacheHits;
-        } else {
-            list_.draw(r, theme);
-        }
-
-        if (!running_) {
-            bool focused = !finished_;
-            r.fillRect(startBounds_, focused ? theme.focusFillColor : theme.surface);
-            r.drawRect(startBounds_, focused ? theme.focusBorderColor : theme.surfaceAlt,
-                       focused ? theme.focusBorderWidth : 1);
-            r.drawText(finished_ ? "Test complete — B to go back" : "Start 5 s scroll test (A)",
-                       {startBounds_.x + 14, startBounds_.y + 10}, theme.fontSmall,
-                       focused ? theme.textPrimary : theme.textSecondary);
-        }
-        drawBackHint(r, theme, bounds_);
-    }
-
-    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
-        if (b == hui::Button::B) {
-            if (g_viewStack) {
-                g_viewStack->pop();
-            }
-            return true;
-        }
-        if (b == hui::Button::A && !running_ && !finished_) {
-            probe_.reset();
-            drawTextCalls_ = 0;
-            drawTextCacheHits_ = 0;
-            scrollTime_ = 0.0f;
-            running_ = true;
-            return true;
-        }
-        if (!running_) {
-            return list_.onButtonDown(b);
-        }
-        return true;
-    }
-
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {{"A", "Start Test", false, 1}, {"B", "Back", false, 10}};
-    }
-
-private:
-    CountingListSource source_;
-    hui::ListView list_{40};
-    std::unique_ptr<RendererProbe> probe_;
-    int drawTextCalls_ = 0;
-    int drawTextCacheHits_ = 0;
-    hui::Rect startBounds_{0, 0, 0, 0};
-    float scrollTime_ = 0.0f;
-    bool running_ = false;
-    bool finished_ = false;
-};
-
-class ListShortQATestView : public hui::View {
-public:
-    HUI_VIEW_TYPE(ListShortQATestView)
-
-    ListShortQATestView() : source_(3) {
-        list_.setSource(&source_);
-    }
-
-    void layout(hui::Rect contentRect) override {
-        bounds_ = contentRect;
-        list_.layout({bounds_.x + 10, bounds_.y + 120, bounds_.w - 20, bounds_.h - 150});
-    }
-
-    void update(float, hui::FocusManager& fm) override {
-        if (fm.focused() != &list_) {
-            fm.setFocus(&list_);
-        }
-    }
-
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect(bounds_, theme.background);
-        r.drawText("ListView — Short List scrollOffset", {bounds_.x + 12, bounds_.y + 8},
-                   theme.fontBody, theme.accent);
-        drawParagraph(
-            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
-            "Only 3 items in a tall viewport. scrollOffset must stay 0 when navigating.\n"
-            "Wrap Up/Down — offset should remain 0 (no UB clamp issues).",
-            theme.textSecondary);
-
-        const int offset = list_.scrollOffset();
-        const bool pass = (offset == 0);
-        std::ostringstream stats;
-        stats << "scrollOffset=" << offset << "  focus=" << list_.getFocusIndex()
-              << "  => " << (pass ? "PASS" : "FAIL");
-        r.drawText(stats.str(), {bounds_.x + 12, bounds_.y + 100}, theme.fontSmall,
-                   pass ? theme.success : theme.warning);
-
-        list_.draw(r, theme);
-        drawBackHint(r, theme, bounds_);
-    }
-
-    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
-        if (b == hui::Button::B) {
-            if (g_viewStack) {
-                g_viewStack->pop();
-            }
-            return true;
-        }
-        return list_.onButtonDown(b);
-    }
-
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {{"Up/Down", "Navigate / Wrap", false, 2}, {"B", "Back", false, 10}};
-    }
-
-private:
-    CountingListSource source_;
-    hui::ListView list_{40};
-};
-
-class Phase12QAMenuView : public hui::View {
-public:
-    HUI_VIEW_TYPE(Phase12QAMenuView)
-
-    Phase12QAMenuView() {
-        items_ = {
-            "Guide Overlay — Nav & Sliders",
-            "Guide Overlay — Slide Animation",
-            "ListView — 5,000 Row Windowing",
-            "ListView — Scroll Text Cache (5 s)",
-            "ListView — Short List scrollOffset",
-        };
-    }
-
-    void layout(hui::Rect contentRect) override { bounds_ = contentRect; }
-
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        r.fillRect(bounds_, theme.background);
-        r.drawText("Phase 12 QA — Manual Tests", {bounds_.x + 12, bounds_.y + 8}, theme.fontBody,
-                   theme.accent);
-        drawParagraph(r, theme, bounds_.x + 12, bounds_.y + 30, bounds_.w - 24,
-                      "Remaining sign-off items. Select a test, follow on-screen instructions.",
-                      theme.textSecondary);
-
-        int y = bounds_.y + 72;
-        for (int i = 0; i < static_cast<int>(items_.size()); ++i) {
-            bool focused = (i == focusIndex_);
-            hui::Rect row{bounds_.x + 10, y, bounds_.w - 20, 30};
-            r.fillRect(row, focused ? theme.focusFillColor : theme.surface);
-            if (focused) {
-                r.drawRect(row, theme.focusBorderColor, theme.focusBorderWidth);
-            }
-            r.drawText(items_[i], {row.x + 10, row.y + 7}, theme.fontSmall,
-                       focused ? theme.textPrimary : theme.textSecondary);
-            y += 34;
-        }
-        drawBackHint(r, theme, bounds_);
-    }
-
-    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
-        if (b == hui::Button::Up && focusIndex_ > 0) {
-            --focusIndex_;
-            return true;
-        }
-        if (b == hui::Button::Down &&
-            focusIndex_ < static_cast<int>(items_.size()) - 1) {
-            ++focusIndex_;
-            return true;
-        }
-        if (b == hui::Button::B) {
-            if (g_viewStack) {
-                g_viewStack->pop();
-            }
-            return true;
-        }
-        if (b == hui::Button::A && g_viewStack) {
-            switch (focusIndex_) {
-                case 0:
-                    g_viewStack->push(std::make_unique<GuideNavQATestView>());
-                    break;
-                case 1:
-                    g_viewStack->push(std::make_unique<GuideAnimQATestView>());
-                    break;
-                case 2:
-                    g_viewStack->push(std::make_unique<ListWindowQATestView>());
-                    break;
-                case 3:
-                    g_viewStack->push(std::make_unique<ListCacheQATestView>());
-                    break;
-                case 4:
-                    g_viewStack->push(std::make_unique<ListShortQATestView>());
-                    break;
-            }
-            return true;
-        }
-        return false;
-    }
-
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {{"A", "Run Test", false, 1}, {"B", "Back", false, 10}};
-    }
-
-private:
-    std::vector<std::string> items_;
-    int focusIndex_ = 0;
+    const Library& lib_;
+    const Player&  player_;
 };
 
 // ---------------------------------------------------------------------------
-// Interactive Main Showcase View
+// Application — owns the screens and wires them to the player
 // ---------------------------------------------------------------------------
-class MoleculeShowcaseView : public hui::View {
+
+class App {
 public:
-    HUI_VIEW_TYPE(MoleculeShowcaseView)
+    App(hui::UISystem& ui, hui::Shell& shell)
+        : ui_(ui)
+        , shell_(shell)
+        , stack_(ui.viewStack())
+        , dirSource_(library_, player_)
+        , allTracks_(library_, player_)
+        , albums_(library_)
+        , queueSource_(library_, player_) {
+        buildQueue();
+    }
 
-    MoleculeShowcaseView() {
-        listHeader_.setLabel("/home/user/music/rock/progressive/dream_theater/scenes_from_a_memory/05_strange_deja_vu.flac");
-        listHeader_.setItemCount(12);
-        listHeader_.setSortBadge("Track #");
+    void start() {
+        dirSource_.setDirectory(library_.rootDir);
 
-        seekableProgress_.setTime(145.0f, 312.0f);
-        seekableProgress_.setProgress(145.0f / 312.0f);
-        seekableProgress_.setOnSeek([this](int direction) {
-            currentTime_ = std::clamp(currentTime_ + direction * 10.0f, 0.0f, totalTime_);
-            seekableProgress_.setTime(currentTime_, totalTime_);
-            seekableProgress_.setProgress(currentTime_ / totalTime_);
-            if (g_toast) {
-                g_toast->show(direction < 0 ? "<< Seek -10s" : ">> Seek +10s", 1.2f);
+        // The root browser is pushed once and never popped: ViewStack::pop()
+        // no-ops at depth 1, so this pointer stays valid for the whole session.
+        auto view = std::make_unique<hui::DirectoryView>(stack_, &shell_);
+        directoryView_ = view.get();
+        wireDirectory(*directoryView_);
+        directoryView_->setSource(&dirSource_);
+        directoryView_->setHeaderPath(library_.dirs[library_.rootDir].path);
+        directoryView_->setSortBadge("Name");
+        stack_.push(std::move(view));
+
+        // Stack mutations are deferred to the next update (§8.2). Realise this
+        // one now so the first button of the session has a screen to land on.
+        stack_.applyPendingMutations(ui_.focusManager());
+
+        refreshChrome();
+    }
+
+    bool running() const { return running_; }
+
+    // Global accelerators (§9.5) for buttons no screen consumed.
+    bool onGlobalButton(hui::Button b) {
+        switch (b) {
+            case hui::Button::Start:  togglePlayPause();  return true;
+            case hui::Button::Select: showNowPlaying();   return true;
+            case hui::Button::Guide:  openGuide();        return true;
+            case hui::Button::B:      goBack();           return true;
+            default: return false;
+        }
+    }
+
+    void update(float dt) {
+        advancePlayback(dt);
+        refreshChrome();
+    }
+
+    // --- Inspection, used by the scripted self-test ------------------------
+
+    hui::ViewStack& stack() { return stack_; }
+    int directoryFocusIndex() const { return directoryView_->list().getFocusIndex(); }
+    int currentDirectory() const { return dirSource_.directory(); }
+    const Player& player() const { return player_; }
+
+    bool topIsNowPlaying() { return topAs<hui::NowPlayingView>() != nullptr; }
+    bool topIsLibrary()    { return topAs<hui::LibraryView>() != nullptr; }
+    bool topIsDirectory()  { return topAs<hui::DirectoryView>() != nullptr; }
+
+private:
+    // Views other than the root are owned by the ViewStack and destroyed on pop,
+    // so they are located by type rather than held (RTTI-free, via View::isType).
+    template <typename T>
+    T* topAs() {
+        hui::View* t = stack_.top();
+        return (t && t->isType<T>()) ? static_cast<T*>(t) : nullptr;
+    }
+
+    // --- Screen wiring ---------------------------------------------------
+
+    void wireDirectory(hui::DirectoryView& view) {
+        view.setOnActivate([this](int index) { activateDirectoryRow(index); });
+
+        view.setOnBuildContextMenu([this](int index, hui::VectorListSource& menu) {
+            const DirEntry* e = dirSource_.entryAt(index);
+            const bool isTrack = e && e->track >= 0;
+            menu.add(isTrack ? "Play Now" : "Open");
+            menu.add("Add to Queue", {}, {}, hui::ListItemVariant::Default, 0, false, !isTrack);
+            menu.add("Track Info", {}, {}, hui::ListItemVariant::Default, 0, false, !isTrack);
+            menu.add("Go to Library");
+        });
+
+        view.setOnContextAction([this](int menuIndex, int itemIndex) {
+            const DirEntry* e = dirSource_.entryAt(itemIndex);
+            switch (menuIndex) {
+                case 0: activateDirectoryRow(itemIndex); break;
+                case 1: enqueueDirectoryRow(itemIndex); break;
+                case 2: openTrackInfo(e && e->track >= 0 ? e->track : -1); break;
+                case 3: showLibrary(); break;
+                default: break;
+            }
+        });
+    }
+
+    void wireLibrary(hui::LibraryView& view) {
+        view.setListSource(&allTracks_);
+        view.setGridSource(&albums_);
+
+        view.setOnActivate([this](int index, int tab) {
+            if (tab == 0) {
+                playTrack(index);
+                showNowPlaying();
+            } else if (index >= 0 && index < static_cast<int>(library_.albums.size())) {
+                shell_.showToast("Album: " + library_.albums[index].title, 2.0f);
             }
         });
 
-        volumeSlider_.setLabel("Master Volume");
-        volumeSlider_.setRange(0, 100, 5);
-        volumeSlider_.setValue(75);
-        volumeSlider_.setOnValueChanged([](int val) {
-            if (g_toast) {
-                g_toast->show("Volume: " + std::to_string(val) + "%", 1.0f);
-            }
+        view.setOnBuildContextMenu([](int, int tab, hui::VectorListSource& menu) {
+            menu.add(tab == 0 ? "Play Now" : "Play Album");
+            menu.add("Add to Queue");
+            menu.add("Track Info", {}, {}, hui::ListItemVariant::Default, 0, false, tab != 0);
         });
 
-        playbackControls_.setPlaybackState(playbackState_);
-        playbackControls_.setShuffle(true);
-        playbackControls_.setRepeatMode(hui::RepeatMode::All);
-        playbackControls_.setOnActivate([this](hui::TransportAction action) {
+        view.setOnContextAction([this](int menuIndex, int itemIndex, int tab) {
+            if (tab != 0) {
+                shell_.showToast("Album action", 1.5f);
+                return;
+            }
+            if (menuIndex == 0)      playTrack(itemIndex);
+            else if (menuIndex == 1) enqueueTrack(itemIndex);
+            else if (menuIndex == 2) openTrackInfo(itemIndex);
+        });
+
+        view.setOnLetterChanged([this](char c) {
+            shell_.showToast(std::string("Jump to ") + c, 1.2f);
+        });
+    }
+
+    void wireNowPlaying(hui::NowPlayingView& view) {
+        view.setQueueSource(&queueSource_);
+        view.setShuffle(player_.shuffle);
+        view.setRepeatMode(player_.repeat);
+
+        view.setOnSeek([this](int direction) { seek(direction * 10.0f); });
+
+        view.setOnTransport([this](hui::TransportAction action) {
             switch (action) {
-                case hui::TransportAction::Previous:
-                    if (g_toast) g_toast->show("Previous track", 1.0f);
-                    break;
-                case hui::TransportAction::PlayPause:
-                    playbackState_ = (playbackState_ == hui::PlaybackState::Playing)
-                        ? hui::PlaybackState::Paused : hui::PlaybackState::Playing;
-                    playbackControls_.setPlaybackState(playbackState_);
-                    break;
-                case hui::TransportAction::Next:
-                    if (g_toast) g_toast->show("Next track", 1.0f);
-                    break;
-                case hui::TransportAction::Shuffle:
-                    shuffleOn_ = !shuffleOn_;
-                    playbackControls_.setShuffle(shuffleOn_);
-                    break;
-                case hui::TransportAction::Repeat:
-                    repeatMode_ = static_cast<hui::RepeatMode>(
-                        (static_cast<int>(repeatMode_) + 1) % 3);
-                    playbackControls_.setRepeatMode(repeatMode_);
-                    break;
+                case hui::TransportAction::PlayPause: togglePlayPause(); break;
+                case hui::TransportAction::Previous:  skip(-1); break;
+                case hui::TransportAction::Next:      skip(1); break;
+                case hui::TransportAction::Shuffle:   toggleShuffle(); break;
+                case hui::TransportAction::Repeat:    cycleRepeat(); break;
             }
         });
 
-        sortIndicator_.setMode("Track #");
+        view.setOnQueueActivate([this](int index) { playQueueIndex(index); });
 
-        gridCell1_.setCell("Metropolis Pt. 2", "1999", 0, false, false);
-        gridCell2_.setCell("Images and Words", "1992", 0, true, false);
-        gridCell3_.setCell("Octavarium", "2005", 0, false, false);
+        view.setOnBuildContextMenu([](int, hui::VectorListSource& menu) {
+            menu.add("Track Info");
+            menu.add("Remove from Queue", {}, {}, hui::ListItemVariant::Default, 0, false, false, true);
+        });
+
+        view.setOnContextAction([this](int menuIndex, int itemIndex) {
+            if (itemIndex < 0 || itemIndex >= static_cast<int>(player_.queue.size())) return;
+            if (menuIndex == 0)      openTrackInfo(player_.queue[itemIndex]);
+            else if (menuIndex == 1) removeFromQueue(itemIndex);
+        });
     }
 
-    void onSuspend() override { inputSuspended_ = true; }
-    void onResume() override { inputSuspended_ = false; }
+    // --- Navigation ------------------------------------------------------
 
-    void layout(hui::Rect contentRect) override {
-        bounds_ = contentRect;
-        int y = bounds_.y + 6;
+    void activateDirectoryRow(int index) {
+        const DirEntry* e = dirSource_.entryAt(index);
+        if (!e) return;
 
-        // 1. ListHeaderWidget pinned at top
-        listHeader_.layout({bounds_.x + 10, y, bounds_.w - 20, 26});
-        y += 32;
-
-        // 2. Interactive SeekableProgressBar
-        seekableProgress_.layout({bounds_.x + 10, y, bounds_.w - 20, 28});
-        y += 34;
-
-        // 3. Interactive Volume Slider
-        volumeSlider_.layout({bounds_.x + 10, y, bounds_.w - 20, 28});
-        y += 34;
-
-        // 4. Playback Controls Row
-        playbackRowBounds_ = {bounds_.x + 10, y, bounds_.w - 20, 36};
-        playbackControls_.layout(playbackRowBounds_);
-        sortIndicator_.layout({playbackRowBounds_.x + playbackRowBounds_.w - 100, playbackRowBounds_.y + 6, 90, 24});
-        y += 42;
-
-        // 5. Toast Trigger, Modal Trigger, and Phase 12 QA action buttons
-        toastActionBounds_ = {bounds_.x + 10, y, (bounds_.w - 26) / 2, 32};
-        modalActionBounds_ = {bounds_.x + 16 + (bounds_.w - 26) / 2, y, (bounds_.w - 26) / 2, 32};
-        y += 38;
-        qaActionBounds_ = {bounds_.x + 10, y, bounds_.w - 20, 32};
-        y += 38;
-
-        // 6. Stamp Previews (List Items & Grid Cells)
-        stampSectionY_ = y;
-    }
-
-    void update(float dt, hui::FocusManager& fm) override {
-        (void)dt;
-        if (inputSuspended_) {
+        if (e->childDir >= 0) {
+            openDirectory(e->childDir);
             return;
         }
-        // Sync focus with focusIndex_
-        if (focusIndex_ == 0 && fm.focused() != &seekableProgress_) {
-            fm.setFocus(&seekableProgress_);
-        } else if (focusIndex_ == 1 && fm.focused() != &volumeSlider_) {
-            fm.setFocus(&volumeSlider_);
-        } else if (focusIndex_ == 2 && fm.focused() != &playbackControls_) {
-            fm.setFocus(&playbackControls_);
-        } else if (focusIndex_ >= 3 && fm.focused() != nullptr) {
-            fm.setFocus(nullptr);
+        if (library_.tracks[e->track].unsupported) {
+            shell_.showToast("Unsupported format", 2.0f);
+            return;
+        }
+        playTrack(e->track);
+        showNowPlaying();
+    }
+
+    void openDirectory(int dir) {
+        dirSource_.setDirectory(dir);
+        directoryView_->setHeaderPath(library_.dirs[dir].path);
+        directoryView_->list().resetFocus();
+        directoryView_->list().notifyRowsChanged();
+        directoryView_->setSource(&dirSource_);
+    }
+
+    void goBack() {
+        // Overlays consume B themselves; this only ever sees screens (§9.5).
+        if (stack_.depth() > 1) {
+            stack_.pop();
+            return;
+        }
+        const int parent = library_.dirs[dirSource_.directory()].parent;
+        if (parent >= 0) {
+            openDirectory(parent);
+            return;
+        }
+        running_ = false;
+    }
+
+    void showLibrary() {
+        if (topAs<hui::LibraryView>()) return;
+        auto view = std::make_unique<hui::LibraryView>(stack_);
+        wireLibrary(*view);
+        stack_.push(std::move(view));
+    }
+
+    void showNowPlaying() {
+        if (topAs<hui::NowPlayingView>()) return;
+        if (player_.current < 0) {
+            shell_.showToast("Nothing playing", 1.5f);
+            return;
+        }
+        auto view = std::make_unique<hui::NowPlayingView>(stack_);
+        wireNowPlaying(*view);
+        stack_.push(std::move(view));
+    }
+
+    void openGuide() {
+        auto guide = std::make_unique<hui::GuideOverlayView>(stack_, ui_.animationsEnabled());
+        guide->masterVolumeSlider().setOnValueChanged([this](int v) {
+            shell_.showToast("Volume " + std::to_string(v) + "%", 1.0f);
+        });
+        guide->setOnSettings([this] { shell_.showToast("Settings (not implemented)", 1.5f); });
+        guide->setOnEqualizer([this] { shell_.showToast("Equalizer (not implemented)", 1.5f); });
+        stack_.push(std::move(guide));
+    }
+
+    void openTrackInfo(int trackIndex) {
+        if (trackIndex < 0) return;
+        stack_.push(std::make_unique<hui::TrackInfoPanelView>(stack_, metadataFor(trackIndex)));
+    }
+
+    // --- Playback --------------------------------------------------------
+
+    void buildQueue() {
+        // Seed the queue with one album so Now Playing has content from the start.
+        for (const DirEntry& e : library_.dirs[library_.seedAlbumDir].entries) {
+            if (e.track >= 0) player_.queue.push_back(e.track);
+        }
+        if (!player_.queue.empty()) player_.current = 0;
+    }
+
+    void playTrack(int trackIndex) {
+        if (trackIndex < 0 || trackIndex >= static_cast<int>(library_.tracks.size())) return;
+        if (library_.tracks[trackIndex].unsupported) {
+            shell_.showToast("Unsupported format", 2.0f);
+            return;
+        }
+
+        auto it = std::find(player_.queue.begin(), player_.queue.end(), trackIndex);
+        if (it == player_.queue.end()) {
+            player_.queue.push_back(trackIndex);
+            it = player_.queue.end() - 1;
+        }
+        player_.current = static_cast<int>(it - player_.queue.begin());
+        player_.elapsed = 0.0f;
+        player_.playing = true;
+        queueChanged();
+        shell_.showToast("Playing: " + library_.tracks[trackIndex].title, 2.0f);
+    }
+
+    void playQueueIndex(int index) {
+        if (index < 0 || index >= static_cast<int>(player_.queue.size())) return;
+        player_.current = index;
+        player_.elapsed = 0.0f;
+        player_.playing = true;
+    }
+
+    void enqueueTrack(int trackIndex) {
+        if (trackIndex < 0 || trackIndex >= static_cast<int>(library_.tracks.size())) return;
+        player_.queue.push_back(trackIndex);
+        queueChanged();
+        shell_.showToast("Added to queue", 1.5f);
+    }
+
+    void enqueueDirectoryRow(int index) {
+        const DirEntry* e = dirSource_.entryAt(index);
+        if (e && e->track >= 0) enqueueTrack(e->track);
+    }
+
+    void removeFromQueue(int index) {
+        if (index < 0 || index >= static_cast<int>(player_.queue.size())) return;
+        player_.queue.erase(player_.queue.begin() + index);
+        if (player_.queue.empty()) {
+            player_.current = -1;
+            player_.playing = false;
+        } else if (index < player_.current) {
+            --player_.current;
+        } else if (index == player_.current) {
+            player_.current = std::min(player_.current, static_cast<int>(player_.queue.size()) - 1);
+            player_.elapsed = 0.0f;
+        }
+        queueChanged();
+        shell_.showToast("Removed from queue", 1.5f);
+    }
+
+    void queueChanged() {
+        if (auto* np = topAs<hui::NowPlayingView>()) np->queue().notifyRowsChanged();
+        if (directoryView_) directoryView_->list().notifyRowsChanged();
+    }
+
+    void togglePlayPause() {
+        if (player_.current < 0) {
+            shell_.showToast("Nothing to play", 1.5f);
+            return;
+        }
+        player_.playing = !player_.playing;
+        shell_.showToast(player_.playing ? "Play" : "Pause", 1.0f);
+    }
+
+    void skip(int direction) {
+        if (player_.queue.empty()) return;
+        const int count = static_cast<int>(player_.queue.size());
+        player_.current = ((player_.current + direction) % count + count) % count;
+        player_.elapsed = 0.0f;
+        queueChanged();
+    }
+
+    void seek(float deltaSeconds) {
+        const int track = player_.currentTrack();
+        if (track < 0) return;
+        player_.elapsed = std::clamp(player_.elapsed + deltaSeconds, 0.0f, library_.tracks[track].seconds);
+        shell_.showToast(deltaSeconds < 0 ? "<< 10s" : ">> 10s", 1.0f);
+    }
+
+    void toggleShuffle() {
+        player_.shuffle = !player_.shuffle;
+        if (auto* np = topAs<hui::NowPlayingView>()) np->setShuffle(player_.shuffle);
+        shell_.showToast(player_.shuffle ? "Shuffle on" : "Shuffle off", 1.2f);
+    }
+
+    void cycleRepeat() {
+        switch (player_.repeat) {
+            case hui::RepeatMode::Off: player_.repeat = hui::RepeatMode::All; break;
+            case hui::RepeatMode::All: player_.repeat = hui::RepeatMode::One; break;
+            case hui::RepeatMode::One: player_.repeat = hui::RepeatMode::Off; break;
+        }
+        if (auto* np = topAs<hui::NowPlayingView>()) np->setRepeatMode(player_.repeat);
+        const char* label = player_.repeat == hui::RepeatMode::Off ? "Repeat off"
+                          : player_.repeat == hui::RepeatMode::All ? "Repeat all" : "Repeat one";
+        shell_.showToast(label, 1.2f);
+    }
+
+    void advancePlayback(float dt) {
+        const int track = player_.currentTrack();
+        if (!player_.playing || track < 0) return;
+
+        // 8x so a demo session actually reaches the end of a track.
+        player_.elapsed += dt * 8.0f;
+        if (player_.elapsed < library_.tracks[track].seconds) return;
+
+        player_.elapsed = 0.0f;
+        if (player_.repeat == hui::RepeatMode::One) return;
+        if (player_.current + 1 >= static_cast<int>(player_.queue.size())
+            && player_.repeat == hui::RepeatMode::Off) {
+            player_.playing = false;
+            return;
+        }
+        skip(1);
+    }
+
+    // --- Chrome ----------------------------------------------------------
+
+    void refreshChrome() {
+        const int track = player_.currentTrack();
+
+        auto* nowPlaying = topAs<hui::NowPlayingView>();
+        if (nowPlaying)                       shell_.setViewMode("NOW PLAYING");
+        else if (topAs<hui::LibraryView>())   shell_.setViewMode("LIBRARY");
+        else                                  shell_.setViewMode("BROWSE");
+
+        if (track >= 0) {
+            shell_.setContextLabel(library_.tracks[track].title + " - " + library_.tracks[track].artist);
+        } else {
+            shell_.setContextLabel(library_.dirs[dirSource_.directory()].path);
+        }
+        shell_.setNowPlaying(player_.playing);
+
+        if (!nowPlaying) return;
+
+        nowPlaying->setPlaybackState(player_.playing ? hui::PlaybackState::Playing
+                                                     : hui::PlaybackState::Paused);
+        if (track >= 0) {
+            const float total = library_.tracks[track].seconds;
+            nowPlaying->setProgress(total > 0.0f ? player_.elapsed / total : 0.0f,
+                                    player_.elapsed, total);
+        } else {
+            nowPlaying->setProgress(0.0f, 0.0f, 0.0f);
         }
     }
 
-    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
-        // Content background
-        r.fillRect(bounds_, theme.background);
-
-        // 1. Draw ListHeaderWidget
-        listHeader_.draw(r, theme);
-
-        // 2. Draw SeekableProgressBar
-        seekableProgress_.draw(r, theme);
-
-        // 3. Draw Volume Slider
-        volumeSlider_.draw(r, theme);
-
-        // 4. Draw Playback Controls
-        playbackControls_.draw(r, theme);
-        sortIndicator_.draw(r, theme);
-
-        // 5. Action Buttons (Toast & Modal)
-        bool isToastFocused = (focusIndex_ == 3);
-        r.fillRect(toastActionBounds_, isToastFocused ? theme.focusFillColor : theme.surface);
-        r.drawRect(toastActionBounds_, isToastFocused ? theme.focusBorderColor : theme.surfaceAlt, isToastFocused ? theme.focusBorderWidth : 1);
-        r.drawText("Trigger Toast (Press A)", {toastActionBounds_.x + 14, toastActionBounds_.y + 8}, theme.fontSmall, isToastFocused ? theme.textPrimary : theme.textSecondary);
-
-        bool isModalFocused = (focusIndex_ == 4);
-        r.fillRect(modalActionBounds_, isModalFocused ? theme.focusFillColor : theme.surface);
-        r.drawRect(modalActionBounds_, isModalFocused ? theme.focusBorderColor : theme.surfaceAlt, isModalFocused ? theme.focusBorderWidth : 1);
-        r.drawText("Open Modal Overlay (Press A)", {modalActionBounds_.x + 14, modalActionBounds_.y + 8}, theme.fontSmall, isModalFocused ? theme.textPrimary : theme.textSecondary);
-
-        bool isQaFocused = (focusIndex_ == 5);
-        r.fillRect(qaActionBounds_, isQaFocused ? theme.focusFillColor : theme.surface);
-        r.drawRect(qaActionBounds_, isQaFocused ? theme.focusBorderColor : theme.surfaceAlt, isQaFocused ? theme.focusBorderWidth : 1);
-        r.drawText("Phase 12 QA Tests (Press A)", {qaActionBounds_.x + 14, qaActionBounds_.y + 8}, theme.fontSmall, isQaFocused ? theme.textPrimary : theme.textSecondary);
-
-        // 6. Section Separator & Stamp Previews
-        int stampY = stampSectionY_;
-        r.drawText("Level 1 Atoms Stamps (ListItemWidget & GridCellWidget)", {bounds_.x + 12, stampY}, theme.fontSmall, theme.accent);
-        stampY += 18;
-
-        // Render 2 sample list rows
-        hui::ListItemWidget listStamp;
-        listStamp.setRow({"01. Overture 1928", "Scene Two: I. Overture", "3:37", hui::ListItemVariant::Track, 0, false, false});
-        listStamp.layout({bounds_.x + 10, stampY, bounds_.w - 20, 24});
-        listStamp.draw(r, theme);
-        stampY += 26;
-
-        listStamp.setRow({"02. Strange Déjà Vu", "Scene Two: II. Strange Déjà Vu", "5:12", hui::ListItemVariant::Track, 0, true, false});
-        listStamp.layout({bounds_.x + 10, stampY, bounds_.w - 20, 24});
-        listStamp.draw(r, theme);
-        stampY += 30;
-
-        // Render 3 grid cells with generated gradients
-        int cellW = (bounds_.w - 40) / 3;
-        gridCell1_.layout({bounds_.x + 10, stampY, cellW, 64});
-        gridCell1_.draw(r, theme);
-
-        gridCell2_.layout({bounds_.x + 20 + cellW, stampY, cellW, 64});
-        gridCell2_.draw(r, theme);
-
-        gridCell3_.layout({bounds_.x + 30 + cellW * 2, stampY, cellW, 64});
-        gridCell3_.draw(r, theme);
+    hui::TrackMetadata metadataFor(int trackIndex) const {
+        hui::TrackMetadata m;
+        if (trackIndex < 0 || trackIndex >= static_cast<int>(library_.tracks.size())) return m;
+        const Track& t = library_.tracks[trackIndex];
+        m.title = t.title;
+        m.artist = t.artist;
+        m.album = t.album;
+        m.year = t.year;
+        m.genre = "Electronic";
+        m.duration = t.durationLabel;
+        m.format = t.format;
+        m.bitrate = t.bitrate;
+        return m;
     }
 
-    bool onButtonDown(hui::Button b, hui::FocusManager& fm) override {
-        (void)fm;
-        // Up/Down changes active focus row
-        if (b == hui::Button::Up) {
-            if (focusIndex_ > 0) {
-                --focusIndex_;
-            }
-            return true;
-        }
-        if (b == hui::Button::Down) {
-            if (focusIndex_ < 5) {
-                ++focusIndex_;
-            }
-            return true;
-        }
+    hui::UISystem& ui_;
+    hui::Shell&    shell_;
+    hui::ViewStack& stack_;
 
-        // Delegate to focused widget
-        if (focusIndex_ == 0) {
-            return seekableProgress_.onButtonDown(b);
-        }
-        if (focusIndex_ == 1) {
-            return volumeSlider_.onButtonDown(b);
-        }
+    Library library_;
+    Player  player_;
 
-        if (focusIndex_ == 2) {
-            return playbackControls_.onButtonDown(b);
-        }
+    DirectorySource dirSource_;
+    AllTracksSource allTracks_;
+    AlbumSource     albums_;
+    QueueSource     queueSource_;
 
-        if (b == hui::Button::A) {
-            if (focusIndex_ == 3) {
-                if (g_toast) {
-                    g_toast->show("Toast Notification #" + std::to_string(g_toastCounter++), 2.5f);
-                }
-                return true;
-            }
-            if (focusIndex_ == 4) {
-                if (g_viewStack) {
-                    g_viewStack->push(std::make_unique<DemoModalView>());
-                }
-                return true;
-            }
-            if (focusIndex_ == 5) {
-                if (g_viewStack) {
-                    g_viewStack->push(std::make_unique<Phase12QAMenuView>());
-                }
-                return true;
-            }
-        }
+    hui::DirectoryView* directoryView_ = nullptr;   // owned by the stack, never popped
 
-        if (b == hui::Button::B) {
-            g_running = false;
-            return true;
-        }
+    bool running_ = true;
+};
 
-        return false;
-    }
+// ---------------------------------------------------------------------------
+// Scripted self-test (--selftest)
+//
+// Drives the app through the Phase 14 QA navigation paths with no window and no
+// user. Exists because those paths cannot be checked by hand in CI, and because
+// running it under ASan catches lifetime bugs in the view push/pop cycle.
+// ---------------------------------------------------------------------------
 
-    std::vector<hui::HintEntry> currentHints() const override {
-        return {
-            {"A", "Interact / Cycle", false, 1},
-            {"B", "Quit App", false, 20},
-            {"L2/R2", "Seek Track", false, 4},
-            {"Up/Down", "Navigate Items", false, 2},
-            {"Left/Right", "Adjust Slider", false, 3}
-        };
+class SelfTest {
+public:
+    SelfTest(hui::UISystem& ui, App& app, hui::Shell& shell) : ui_(ui), app_(app), shell_(shell) {}
+
+    int run() {
+        press(hui::Button::Down);                       // move off row 0
+        const int browsedRow = app_.directoryFocusIndex();
+        check(browsedRow == 1, "Down moves directory focus to row 1");
+
+        press(hui::Button::Up);
+        press(hui::Button::A);                          // enter /music/Autechre
+        check(app_.topIsDirectory(), "folder activation stays in DirectoryView");
+        check(app_.currentDirectory() != 0, "folder activation changed directory");
+
+        press(hui::Button::A);                          // enter Tri Repetae
+        press(hui::Button::Down);
+        press(hui::Button::Down);
+        const int trackRow = app_.directoryFocusIndex();
+        press(hui::Button::A);                          // play a track
+        check(app_.topIsNowPlaying(), "activating a track opens NowPlayingView");
+        check(app_.player().playing, "activating a track starts playback");
+
+        // Transport row: Left/Right must reach all five segments, A must fire.
+        press(hui::Button::Up);                         // queue -> transport
+        press(hui::Button::Up);                         // transport -> seek bar
+        press(hui::Button::Down);                       // back to transport
+        const bool wasPlaying = app_.player().playing;
+        press(hui::Button::A);                          // play/pause segment
+        check(app_.player().playing != wasPlaying, "A on the transport row toggles play/pause");
+        for (int i = 0; i < 5; ++i) press(hui::Button::Right);
+        press(hui::Button::A);
+        for (int i = 0; i < 5; ++i) press(hui::Button::Left);
+
+        // Seek bar must respond to both Left/Right and L2/R2 (§9.5).
+        press(hui::Button::Up);                         // transport -> seek bar
+        const float before = app_.player().elapsed;
+        press(hui::Button::Right);
+        check(app_.player().elapsed > before, "Left/Right seeks while the seek bar is focused");
+        const float afterDpad = app_.player().elapsed;
+        press(hui::Button::L2);
+        check(app_.player().elapsed < afterDpad, "L2 seeks backward");
+
+        // Overlays: open and dismiss each, confirming the stack unwinds.
+        const size_t depthBefore = app_.stack().depth();
+        press(hui::Button::X);
+        check(app_.stack().depth() == depthBefore + 1, "X opens the context menu");
+        press(hui::Button::B);
+        check(app_.stack().depth() == depthBefore, "B closes the context menu");
+
+        press(hui::Button::Guide);
+        check(app_.stack().depth() == depthBefore + 1, "Guide opens the guide overlay");
+        press(hui::Button::B);
+        check(app_.stack().depth() == depthBefore, "B closes the guide overlay");
+
+        // Back to the browser; focus must land where it was left.
+        press(hui::Button::B);
+        check(app_.topIsDirectory(), "B returns from NowPlayingView to the browser");
+        check(app_.directoryFocusIndex() == trackRow, "browser focus index survives the round trip");
+
+        // Select jumps to Now Playing from anywhere, then B returns.
+        press(hui::Button::Select);
+        check(app_.topIsNowPlaying(), "Select jumps to NowPlayingView");
+        press(hui::Button::B);
+        check(app_.topIsDirectory(), "B returns to the browser");
+
+        // Start toggles playback without leaving the browser.
+        const bool playing = app_.player().playing;
+        press(hui::Button::Start);
+        check(app_.player().playing != playing, "Start toggles play/pause from the browser");
+        check(app_.topIsDirectory(), "Start does not change screens");
+
+        // Climb back to /music, where the unsupported file lives.
+        press(hui::Button::B);
+        press(hui::Button::B);
+        const int rootDir = app_.currentDirectory();
+        check(app_.topIsDirectory() && app_.running(), "B walks up the tree without quitting");
+
+        // The disabled row must be reachable by focus but refuse activation.
+        press(hui::Button::R2);                         // jump to last row
+        press(hui::Button::A);
+        check(app_.topIsDirectory() && app_.currentDirectory() == rootDir,
+              "activating an unsupported track does not navigate");
+
+        // Library: both tabs render, and L1/R1 switches between them.
+        openLibrary();
+        check(app_.topIsLibrary(), "the library is reachable from the browser");
+        press(hui::Button::Down);
+        press(hui::Button::Down);
+        press(hui::Button::R1);                         // list tab -> grid tab
+        press(hui::Button::Down);
+        press(hui::Button::L1);                         // back to the list tab
+        check(app_.topIsLibrary(), "L1/R1 switches library tabs without leaving the view");
+        press(hui::Button::B);
+        check(app_.topIsDirectory(), "B leaves the library");
+
+        mash();
+        check(app_.running(), "button mashing left the app running");
+
+        std::cout << "\nself-test: " << passed_ << " passed, " << failed_ << " failed\n";
+        return failed_ == 0 ? 0 : 1;
     }
 
 private:
-    bool inputSuspended_ = false;
-    int focusIndex_ = 0;
-    float currentTime_ = 145.0f;
-    float totalTime_ = 312.0f;
-    hui::PlaybackState playbackState_ = hui::PlaybackState::Playing;
+    void pump(int frames = 3) {
+        for (int i = 0; i < frames; ++i) {
+            ui_.update(kDt);
+            app_.update(kDt);
+            shell_.update(kDt);
+        }
+    }
 
-    hui::ListHeaderWidget listHeader_;
-    hui::SeekableProgressBar seekableProgress_;
-    hui::Slider volumeSlider_;
-    hui::PlaybackControlsRow playbackControls_;
-    hui::SortModeIndicator sortIndicator_;
-    bool shuffleOn_ = true;
-    hui::RepeatMode repeatMode_ = hui::RepeatMode::All;
+    void press(hui::Button b) {
+        ui_.onButtonDown(b);
+        pump(1);
+        ui_.onButtonUp(b);
+        pump();
+    }
 
-    hui::GridCellWidget gridCell1_;
-    hui::GridCellWidget gridCell2_;
-    hui::GridCellWidget gridCell3_;
+    // The library has no shortcut by design (§9.5); it hangs off the browser's
+    // context menu, which is the last entry.
+    void openLibrary() {
+        press(hui::Button::X);
+        for (int i = 0; i < 3; ++i) press(hui::Button::Down);
+        press(hui::Button::A);
+    }
 
-    hui::Rect playbackRowBounds_{0, 0, 0, 0};
-    hui::Rect toastActionBounds_{0, 0, 0, 0};
-    hui::Rect modalActionBounds_{0, 0, 0, 0};
-    hui::Rect qaActionBounds_{0, 0, 0, 0};
-    int stampSectionY_ = 0;
+    // Holds several buttons at once and releases them out of order, which is
+    // what actual mashing looks like to ChordDetector and KeyRepeatDriver.
+    // B is excluded: at the root it quits by design, which would end the run
+    // early and prove nothing about crash resistance.
+    void mash() {
+        const hui::Button all[] = {
+            hui::Button::Up, hui::Button::Down, hui::Button::Left, hui::Button::Right,
+            hui::Button::A, hui::Button::X, hui::Button::Y,
+            hui::Button::L1, hui::Button::L2, hui::Button::R1, hui::Button::R2,
+            hui::Button::Start, hui::Button::Select, hui::Button::Guide,
+        };
+        const int count = static_cast<int>(sizeof(all) / sizeof(all[0]));
+
+        unsigned seed = 12345;
+        auto next = [&seed] { seed = seed * 1103515245u + 12345u; return (seed >> 16) & 0x7fff; };
+
+        for (int round = 0; round < 400 && app_.running(); ++round) {
+            hui::Button held[4];
+            const int n = 1 + static_cast<int>(next() % 4);
+            for (int i = 0; i < n; ++i) {
+                held[i] = all[next() % count];
+                ui_.onButtonDown(held[i]);
+            }
+            pump(1);
+            for (int i = n - 1; i >= 0; --i) {
+                ui_.onButtonUp(held[i]);
+            }
+            pump(1);
+        }
+    }
+
+    void check(bool ok, const char* what) {
+        if (ok) {
+            ++passed_;
+        } else {
+            ++failed_;
+            std::cerr << "  FAIL: " << what << "\n";
+        }
+    }
+
+    static constexpr float kDt = 1.0f / 60.0f;
+
+    hui::UISystem& ui_;
+    App&           app_;
+    hui::Shell&    shell_;
+    int passed_ = 0;
+    int failed_ = 0;
 };
+
+hui::Theme makeTheme(hui::FontHandle body, hui::FontHandle small) {
+    hui::Theme theme{};
+    theme.background       = {18, 20, 26, 255};
+    theme.surface          = {28, 32, 42, 255};
+    theme.surfaceAlt       = {38, 44, 58, 255};
+    theme.accent           = {70, 160, 245, 255};
+    theme.textPrimary      = {245, 248, 255, 255};
+    theme.textSecondary    = {150, 160, 180, 255};
+    theme.textDisabled     = {90, 95, 110, 255};
+    theme.warning          = {245, 80, 80, 255};
+    theme.success          = {80, 220, 110, 255};
+    theme.overlay          = {0, 0, 0, 175};
+    theme.focusBorderColor = {90, 175, 255, 255};
+    theme.focusBorderWidth = 2;
+    theme.focusFillColor   = {35, 55, 85, 255};
+    theme.fontBody         = body;
+    theme.fontSmall        = small;
+    theme.fontMono         = small;
+    theme.fontBodySize     = 15;
+    theme.fontSmallSize    = 12;
+    return theme;
+}
+
+void printControls() {
+    std::cout <<
+        "\n=========================================================\n"
+        "  LHCUI example — mock gamepad music player\n"
+        "=========================================================\n"
+        "  Button map (DESIGN.md 9.5)      Keyboard\n"
+        "  ---------------------------------------------------\n"
+        "  D-pad move focus                Arrow keys\n"
+        "  A     activate                  Z\n"
+        "  B     back / quit at root       X\n"
+        "  X     context menu              A or C\n"
+        "  Y     queue grab mode           S or V\n"
+        "  Start play/pause                Enter\n"
+        "  Sel.  jump to Now Playing       Tab\n"
+        "  L1/R1 prev / next track         Q / E\n"
+        "  L2/R2 seek -10s / +10s          W / R\n"
+        "  Guide guide overlay             Esc, G or F12\n"
+        "=========================================================\n\n" << std::flush;
+}
 
 } // namespace example
 
 int main(int argc, char* argv[]) {
-    (void)argc;
-    (void)argv;
+    bool selfTest = false;
+    for (int i = 1; i < argc; ++i) {
+        if (std::string(argv[i]) == "--selftest") selfTest = true;
+    }
+    if (selfTest) {
+        // No window server needed, so this runs in CI and under sanitizers.
+        SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy");
+    }
 
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0) {
         std::cerr << "SDL_Init failed: " << SDL_GetError() << "\n";
         return 1;
     }
-
     if (TTF_Init() < 0) {
         std::cerr << "TTF_Init failed: " << TTF_GetError() << "\n";
         SDL_Quit();
@@ -1053,9 +999,10 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
+    SDL_WM_SetCaption("LHCUI Example", nullptr);
     renderer = std::make_unique<hui::SDL1Renderer>(screen);
 #else
-    SDL_Window* window = SDL_CreateWindow("LHCUI Showcase — Molecules & Phase 12 QA",
+    SDL_Window* window = SDL_CreateWindow("LHCUI Example — Music Player",
                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                           screenW, screenH, SDL_WINDOW_SHOWN);
     if (!window) {
@@ -1064,7 +1011,8 @@ int main(int argc, char* argv[]) {
         SDL_Quit();
         return 1;
     }
-    SDL_Renderer* sdlRenderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    SDL_Renderer* sdlRenderer = SDL_CreateRenderer(window, -1,
+                                                   SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
     if (!sdlRenderer) {
         std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
         SDL_DestroyWindow(window);
@@ -1075,133 +1023,96 @@ int main(int argc, char* argv[]) {
     renderer = std::make_unique<hui::SDL2Renderer>(sdlRenderer);
 #endif
 
-    // Load fonts
     TTF_Font* bodyFont = TTF_OpenFont("assets/Roboto-Regular.ttf", 15);
     TTF_Font* smallFont = TTF_OpenFont("assets/Roboto-Regular.ttf", 12);
     if (!bodyFont) {
         bodyFont = TTF_OpenFont("../assets/Roboto-Regular.ttf", 15);
         smallFont = TTF_OpenFont("../assets/Roboto-Regular.ttf", 12);
     }
-
-    hui::FontHandle fontBodyHandle = 0;
-    hui::FontHandle fontSmallHandle = 0;
-    if (bodyFont) {
-#ifdef HUI_USE_SDL1
-        fontBodyHandle = static_cast<hui::SDL1Renderer*>(renderer.get())->registerFont(bodyFont);
-        fontSmallHandle = smallFont ? static_cast<hui::SDL1Renderer*>(renderer.get())->registerFont(smallFont) : fontBodyHandle;
-#else
-        fontBodyHandle = static_cast<hui::SDL2Renderer*>(renderer.get())->registerFont(bodyFont);
-        fontSmallHandle = smallFont ? static_cast<hui::SDL2Renderer*>(renderer.get())->registerFont(smallFont) : fontBodyHandle;
-#endif
+    if (!bodyFont) {
+        std::cerr << "Failed to load assets/Roboto-Regular.ttf — run from the repo root or build/\n";
     }
 
-    // Modern Dark Theme
-    hui::Theme theme{};
-    theme.background       = {18, 20, 26, 255};
-    theme.surface          = {28, 32, 42, 255};
-    theme.surfaceAlt       = {38, 44, 58, 255};
-    theme.accent           = {70, 160, 245, 255};
-    theme.textPrimary      = {245, 248, 255, 255};
-    theme.textSecondary    = {150, 160, 180, 255};
-    theme.textDisabled     = {90, 95, 110, 255};
-    theme.warning          = {245, 80, 80, 255};
-    theme.success          = {80, 220, 110, 255};
-    theme.overlay          = {0, 0, 0, 175};
-    theme.focusBorderColor = {90, 175, 255, 255};
-    theme.focusBorderWidth = 2;
-    theme.focusFillColor   = {35, 55, 85, 255};
-    theme.fontBody         = fontBodyHandle;
-    theme.fontSmall        = fontSmallHandle;
-    theme.fontBodySize     = 15;
-    theme.fontSmallSize    = 12;
+    hui::FontHandle fontBody = 0;
+    hui::FontHandle fontSmall = 0;
+    if (bodyFont) {
+#ifdef HUI_USE_SDL1
+        auto* concrete = static_cast<hui::SDL1Renderer*>(renderer.get());
+#else
+        auto* concrete = static_cast<hui::SDL2Renderer*>(renderer.get());
+#endif
+        fontBody = concrete->registerFont(bodyFont);
+        fontSmall = smallFont ? concrete->registerFont(smallFont) : fontBody;
+    }
 
-    // Instantiate UISystem
+    const hui::Theme theme = example::makeTheme(fontBody, fontSmall);
+
     hui::UISystem uiSystem(*renderer, theme);
-    example::g_viewStack = &uiSystem.viewStack();
-    example::g_running = true;
 
-    // Create persistent Chrome widgets
-    hui::StatusBarWidget statusBar;
-    statusBar.layout({0, 0, screenW, 24});
-    statusBar.setViewMode("NOW PLAYING");
-    statusBar.setContextLabel("Scenes from a Memory");
-    statusBar.setNowPlaying(true);
-    statusBar.setClock("14:23");
-    statusBar.setBatteryLevel(92);
+    hui::Shell shell(uiSystem.viewStack());
+    shell.layout({0, 0, screenW, screenH});
+    shell.setClock("14:23");
+    shell.setBatteryLevel(92);
+    uiSystem.setShell(&shell);
 
-    hui::HintBarWidget hintBar(&uiSystem.viewStack());
-    hintBar.layout({0, screenH - 28, screenW, 28});
+    example::App app(uiSystem, shell);
+    uiSystem.setGlobalAccelerator([&app](hui::Button b) { return app.onGlobalButton(b); });
+    app.start();
 
-    hui::ToastNotification toast;
-    toast.layout({0, 0, screenW, screenH});
-    example::g_toast = &toast;
+    if (selfTest) {
+        const int result = example::SelfTest(uiSystem, app, shell).run();
+        renderer.reset();
+#ifndef HUI_USE_SDL1
+        SDL_DestroyRenderer(sdlRenderer);
+        SDL_DestroyWindow(window);
+#endif
+        if (bodyFont) TTF_CloseFont(bodyFont);
+        if (smallFont && smallFont != bodyFont) TTF_CloseFont(smallFont);
+        TTF_Quit();
+        SDL_Quit();
+        return result;
+    }
 
-    // Set content area for stacked views between status bar and hint bar
-    uiSystem.viewStack().setContentRect({0, 24, screenW, screenH - 52});
+    hui::SDLGamepadHelper gamepad;
+    if (gamepad.openController(0)) {
+        std::cout << "Gamepad connected.\n";
+    }
 
-    // Push initial showcase view
-    uiSystem.viewStack().push(std::make_unique<example::MoleculeShowcaseView>());
+    example::printControls();
 
-    // Show initial welcome toast
-    toast.show("Welcome! Navigate to Phase 12 QA Tests for manual sign-off.", 3.0f);
+    uint32_t lastTime = SDL_GetTicks();
 
-    std::cout << "\n========================================================\n"
-              << "          LHCUI Showcase (Molecules + Phase 12 QA)       \n"
-              << "========================================================\n"
-              << " Controls (Keyboard Mapping):\n"
-              << "  - Up / Down       : Move focus between interactive rows\n"
-              << "  - Left / Right    : Adjust Slider (Master Volume)\n"
-              << "  - W / R (or 3 / 4): Seek track on SeekableProgressBar (L2/R2)\n"
-              << "  - Z / Space / Ent : Button A (Activate / Cycle transport / Toast)\n"
-              << "  - X / Esc         : Button B (Dismiss modal / Quit)\n"
-              << "  - A / C / S / V   : Buttons X and Y\n"
-              << "  - Q / E           : Shoulders L1 and R1\n"
-              << "\n"
-              << " Phase 12 manual QA: focus \"Phase 12 QA Tests\" and press A.\n"
-              << "========================================================\n\n" << std::flush;
-
-    uint64_t lastTime = SDL_GetTicks();
-
-    while (example::g_running) {
-        uint64_t now = SDL_GetTicks();
-        float dt = (now - lastTime) / 1000.0f;
+    while (app.running()) {
+        const uint32_t now = SDL_GetTicks();
+        const float dt = (now - lastTime) / 1000.0f;
         lastTime = now;
 
         SDL_Event e;
         while (SDL_PollEvent(&e)) {
             if (e.type == SDL_QUIT) {
-                example::g_running = false;
+                return 0;
             }
+
+            if (auto padEvent = gamepad.translate(e)) {
+                if (padEvent->kind == hui::ButtonEventKind::Down) uiSystem.onButtonDown(padEvent->button);
+                else                                              uiSystem.onButtonUp(padEvent->button);
+                continue;
+            }
+
 #ifdef HUI_ENABLE_KEYBOARD_FALLBACK
-            auto btnEvent = hui::KeyboardFallback::translate(e);
-            if (btnEvent) {
-                if (btnEvent->kind == hui::ButtonEventKind::Down) {
-                    uiSystem.onButtonDown(btnEvent->button);
-                } else {
-                    uiSystem.onButtonUp(btnEvent->button);
-                }
+            if (auto keyEvent = hui::KeyboardFallback::translate(e)) {
+                if (keyEvent->kind == hui::ButtonEventKind::Down) uiSystem.onButtonDown(keyEvent->button);
+                else                                             uiSystem.onButtonUp(keyEvent->button);
             }
 #endif
         }
 
-        // Update system, chrome widgets, and toast
+        app.update(dt);
         uiSystem.update(dt);
-        statusBar.update(dt);
-        toast.update(dt);
+        shell.update(dt);
 
-        // Render Frame
         renderer->beginFrame();
-
-        // 1. Draw persistent chrome (Status Bar & Hint Bar)
-        statusBar.draw(*renderer, theme);
-        hintBar.draw(*renderer, theme);
-
-        // 2. Draw view stack (content views + modal overlays + dimming scrim)
         uiSystem.draw();
-
-        // 3. Draw overlay layer (Toast Notification on top of everything)
-        toast.draw(*renderer, theme);
-
         renderer->endFrame();
 
         SDL_Delay(16);
@@ -1210,12 +1121,13 @@ int main(int argc, char* argv[]) {
     if (bodyFont) TTF_CloseFont(bodyFont);
     if (smallFont && smallFont != bodyFont) TTF_CloseFont(smallFont);
 
+    renderer.reset();
+
 #ifndef HUI_USE_SDL1
     SDL_DestroyRenderer(sdlRenderer);
     SDL_DestroyWindow(window);
 #endif
 
-    renderer.reset();
     TTF_Quit();
     SDL_Quit();
 

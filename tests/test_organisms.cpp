@@ -475,6 +475,94 @@ TEST_SUITE("Phase 12 - Organisms") {
         CHECK(cancelled);
     }
 
+    // Deferred mutations apply in queue order (§8.2). An overlay that popped
+    // itself after running its callback would cancel out whatever the callback
+    // pushed, so every overlay must queue its own pop first.
+    TEST_CASE("Overlay callbacks may push a view without it being popped") {
+        class EmptyBaseView : public View {
+        public:
+            HUI_VIEW_TYPE(EmptyBaseView)
+            void draw(IRenderer&, const Theme&) override {}
+        };
+        class PushedView : public View {
+        public:
+            HUI_VIEW_TYPE(PushedView)
+            bool dimsBelow() const override { return true; }
+            void draw(IRenderer&, const Theme&) override {}
+        };
+
+        SUBCASE("ContextMenuView action") {
+            FocusManager fm;
+            ViewStack stack(&fm);
+            stack.setContentRect({0, 0, 640, 480});
+
+            auto menu = std::make_unique<ContextMenuView>(stack);
+            menu->source().add("Open Something");
+            ContextMenuView* menuPtr = menu.get();
+            menuPtr->setOnAction([&](int) {
+                stack.push(std::make_unique<PushedView>());
+            });
+
+            stack.push(std::make_unique<EmptyBaseView>());
+            stack.push(std::move(menu));
+            stack.applyPendingMutations(fm);
+            REQUIRE(stack.depth() == 2);
+
+            menuPtr->onButtonDown(Button::A, fm);
+            stack.applyPendingMutations(fm);
+
+            CHECK(stack.depth() == 2);
+            CHECK(stack.top()->isType<PushedView>());
+        }
+
+        SUBCASE("ConfirmationDialogView confirm") {
+            FocusManager fm;
+            ViewStack stack(&fm);
+            stack.setContentRect({0, 0, 640, 480});
+
+            auto dialog = std::make_unique<ConfirmationDialogView>(stack);
+            ConfirmationDialogView* dialogPtr = dialog.get();
+            dialogPtr->setOnConfirm([&]() {
+                stack.push(std::make_unique<PushedView>());
+            });
+
+            stack.push(std::make_unique<EmptyBaseView>());
+            stack.push(std::move(dialog));
+            stack.applyPendingMutations(fm);
+            REQUIRE(stack.depth() == 2);
+
+            dialogPtr->onButtonDown(Button::Right, fm);   // Cancel -> Confirm
+            dialogPtr->onButtonDown(Button::A, fm);
+            stack.applyPendingMutations(fm);
+
+            CHECK(stack.depth() == 2);
+            CHECK(stack.top()->isType<PushedView>());
+        }
+
+        SUBCASE("GuideOverlayView close") {
+            FocusManager fm;
+            ViewStack stack(&fm);
+            stack.setContentRect({0, 0, 640, 480});
+
+            auto guide = std::make_unique<GuideOverlayView>(stack, false);
+            GuideOverlayView* guidePtr = guide.get();
+            guidePtr->setOnClose([&]() {
+                stack.push(std::make_unique<PushedView>());
+            });
+
+            stack.push(std::make_unique<EmptyBaseView>());
+            stack.push(std::move(guide));
+            stack.applyPendingMutations(fm);
+            REQUIRE(stack.depth() == 2);
+
+            guidePtr->onButtonDown(Button::B, fm);
+            stack.applyPendingMutations(fm);
+
+            CHECK(stack.depth() == 2);
+            CHECK(stack.top()->isType<PushedView>());
+        }
+    }
+
     TEST_CASE("ContextMenuView overlay does not add full-screen fill") {
         FocusManager fm;
         ViewStack stack(&fm);

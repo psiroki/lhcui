@@ -7,10 +7,13 @@ ContextMenuView::ContextMenuView(ViewStack& stack)
     , list_(36) {
     list_.setSource(&source_);
     list_.setOnActivate([this](int index) {
+        // Pop first. Mutations are deferred and applied in queue order (§8.2),
+        // so popping after the callback would discard whatever the callback
+        // pushed. This object stays alive for the callback either way.
+        stack_.pop();
         if (onAction_) {
             onAction_(index);
         }
-        stack_.pop();
     });
 }
 
@@ -36,10 +39,10 @@ void ContextMenuView::draw(IRenderer& renderer, const Theme& theme) {
 
 bool ContextMenuView::onButtonDown(Button b, FocusManager& fm) {
     if (b == Button::B) {
+        stack_.pop();
         if (onCancel_) {
             onCancel_();
         }
-        stack_.pop();
         return true;
     }
 

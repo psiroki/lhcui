@@ -121,19 +121,21 @@ void GuideOverlayView::activateFocused() {
             onSettings_();
         }
     } else if (current == &closeBtn_) {
+        // Pop before the callback so a callback that pushes is not discarded
+        // by this pop when the deferred queue drains in order (§8.2).
+        stack_.pop();
         if (onClose_) {
             onClose_();
         }
-        stack_.pop();
     }
 }
 
 bool GuideOverlayView::onButtonDown(Button b, FocusManager& fm) {
     if (b == Button::B) {
+        stack_.pop();
         if (onClose_) {
             onClose_();
         }
-        stack_.pop();
         return true;
     }
 

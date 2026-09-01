@@ -67,16 +67,18 @@ void ConfirmationDialogView::draw(IRenderer& renderer, const Theme& theme) {
 }
 
 void ConfirmationDialogView::activateFocused(FocusManager& fm) {
+    // Pop before the callback: deferred mutations apply in queue order (§8.2),
+    // so popping afterwards would discard anything the callback pushed.
     if (nav_.current() == &confirmButton_) {
+        stack_.pop();
         if (onConfirm_) {
             onConfirm_();
         }
-        stack_.pop();
     } else if (nav_.current() == &cancelButton_) {
+        stack_.pop();
         if (onCancel_) {
             onCancel_();
         }
-        stack_.pop();
     } else {
         nav_.focusIndex(0, fm);
     }
@@ -84,10 +86,10 @@ void ConfirmationDialogView::activateFocused(FocusManager& fm) {
 
 bool ConfirmationDialogView::onButtonDown(Button b, FocusManager& fm) {
     if (b == Button::B) {
+        stack_.pop();
         if (onCancel_) {
             onCancel_();
         }
-        stack_.pop();
         return true;
     }
 

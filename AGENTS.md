@@ -8,15 +8,21 @@ Quick orientation for automated agents working in this repo. For full semantics,
 - **C++17.** Public headers live in `include/hui/`, implementations in `src/`.
 - **Default renderer:** SDL2 (`cmake ..` in `build/`). SDL1 is opt-in via `-DHUI_USE_SDL1=ON`.
 - **Mac:** SDL1 is not available and will not be installed. Always configure with SDL2 (`HUI_USE_SDL1=OFF`). Do not attempt SDL1 builds on macOS.
+- **Mac / `sdl2-compat` trap.** Homebrew has both `sdl2` and `sdl2-compat` installed, and `sdl2-compat` owns the `/opt/homebrew/lib/libSDL2-2.0.0.dylib` symlink. It is not SDL2: it reimplements the SDL2 API and `dlopen`s **SDL3**, so it never appears in `otool -L`. Both report version 2.32.70, so `pkg-config` cannot tell them apart. Ordinary runs work; **ASan hangs indefinitely**. To get the real SDL2, run with `DYLD_LIBRARY_PATH=/opt/homebrew/opt/sdl2/lib`. Verify with `otool -L build/hui_example | grep -i sdl` — a path containing `sdl2-compat` means you are on SDL3.
 - **Keyboard fallback** (`HUI_ENABLE_KEYBOARD_FALLBACK`) defaults on in non-Release builds for desktop testing without a gamepad.
-- **Verify changes:** from `build/`, run `cmake --build . && ./hui_tests`. All tests must pass before checking QA items in `TODO.md`.
+- **Verify changes:** from `build/`, run `cmake --build . && ./hui_tests && ./hui_example --selftest`. Both must pass before checking QA items in `TODO.md`.
 
 ```bash
 mkdir -p build && cd build
 cmake .. -DHUI_USE_SDL1=OFF
 cmake --build .
 ./hui_tests
+./hui_example --selftest   # headless; drives the app through the QA navigation paths
 ```
+
+`hui_example --selftest` forces SDL's dummy video driver, scripts a full navigation session
+(browse, play, transport, overlays, library tabs, button mashing), prints a pass/fail count
+and exits non-zero on failure. It covers the integration paths `hui_tests` cannot reach.
 
 When adding a new `src/*.cpp`, append it to the `add_library(hui STATIC …)` list in `CMakeLists.txt`. New test files go into the `hui_tests` target the same way.
 

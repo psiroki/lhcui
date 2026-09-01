@@ -7,6 +7,8 @@
 #include "hui/ViewStack.h"
 #include "hui/types.h"
 
+#include <functional>
+
 namespace hui {
 
 class Shell;
@@ -38,6 +40,14 @@ public:
     void onButtonDown(Button b);
     void onButtonUp(Button b);
 
+    // --- Global accelerators (§9.3, §9.5) ---
+    // Last-resort handler for buttons the top View left unhandled. Suppressed
+    // while an overlay (dimsBelow() == true) is on top: an overlay owns every
+    // button for as long as it is up, including the ones it chooses to ignore.
+    // A pushed screen is not an overlay and does not suppress it.
+    // Returns true if the accelerator consumed the button.
+    void setGlobalAccelerator(std::function<bool(Button)> cb);
+
     // --- Screen-off support (§10.1) ---
     void setSuspended(bool s);
     bool isSuspended() const;
@@ -61,10 +71,14 @@ public:
     const Theme& theme() const;
 
 private:
+    // Routes a Down through the stack, falling back to the global accelerator.
+    void dispatchDown(Button b);
+
     IRenderer& renderer_;
     const Theme& theme_;
     FocusManager focusManager_;
     ViewStack viewStack_;
+    std::function<bool(Button)> globalAccelerator_;
     KeyRepeatDriver keyRepeat_;
     ChordDetector chords_;
     Shell* shell_ = nullptr;

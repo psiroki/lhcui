@@ -10,6 +10,26 @@ UISystem::UISystem(IRenderer& renderer, const Theme& theme)
       viewStack_(&focusManager_) {
 }
 
+void UISystem::setGlobalAccelerator(std::function<bool(Button)> cb) {
+    globalAccelerator_ = std::move(cb);
+}
+
+void UISystem::dispatchDown(Button b) {
+    // An overlay owns every button while it is up (§9.5), including the ones it
+    // ignores. A pushed screen does not — it is still ordinary navigation.
+    // dimsBelow() is what separates the two (§8.3). Sampled before dispatch: a
+    // handler may push or pop, and the question is what was on top when the
+    // button arrived, not afterwards.
+    const View* top = viewStack_.top();
+    const bool overlayOpen = top && top->dimsBelow();
+
+    if (viewStack_.dispatchButtonDown(b, focusManager_)) return;
+    if (overlayOpen || !globalAccelerator_) return;
+
+    globalAccelerator_(b);
+    viewStack_.applyPendingMutations(focusManager_);
+}
+
 void UISystem::onButtonDown(Button b) {
     auto chordOpt = chords_.onButtonDown(b);
     if (!chordOpt.has_value()) return;
@@ -18,7 +38,7 @@ void UISystem::onButtonDown(Button b) {
     keyRepeat_.onButtonDown(finalButton);
 
     if (!suspended_) {
-        viewStack_.dispatchButtonDown(finalButton, focusManager_);
+        dispatchDown(finalButton);
     }
 }
 
@@ -50,7 +70,7 @@ void UISystem::update(float elapsedSeconds) {
         if (e.kind == ButtonEventKind::Down) {
             keyRepeat_.onButtonDown(e.button);
             if (!suspended_) {
-                viewStack_.dispatchButtonDown(e.button, focusManager_);
+                dispatchDown(e.button);
             }
         }
     });
@@ -58,7 +78,7 @@ void UISystem::update(float elapsedSeconds) {
     // Drive KeyRepeatDriver (injects synthetic events)
     keyRepeat_.update(dt, [&](ButtonEvent e) {
         if (!suspended_) {
-            viewStack_.dispatchButtonDown(e.button, focusManager_);
+            dispatchDown(e.button);
         }
     });
 
