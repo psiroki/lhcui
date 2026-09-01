@@ -21,6 +21,25 @@ bool SeekableProgressBar::onButtonDown(Button b) {
         return true;
     }
 
+    if (isFocused()) {
+        if (b == Button::Left) {
+            if (onSeek_) {
+                onSeek_(-1);
+            }
+            return true;
+        }
+        if (b == Button::Right) {
+            if (onSeek_) {
+                onSeek_(1);
+            }
+            return true;
+        }
+    }
+
+    if (b == Button::Up || b == Button::Down) {
+        return false;
+    }
+
     return false;
 }
 

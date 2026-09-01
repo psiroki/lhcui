@@ -193,6 +193,8 @@ TEST_SUITE("Phase 11 - Molecules") {
             seekCalls++;
         });
 
+        FocusManager fm;
+
         // Non-seek buttons should return false and not invoke onSeek
         CHECK_FALSE(bar.onButtonDown(Button::A));
         CHECK_FALSE(bar.onButtonDown(Button::B));
@@ -204,46 +206,37 @@ TEST_SUITE("Phase 11 - Molecules") {
         CHECK_FALSE(bar.onButtonDown(Button::R1));
         CHECK(seekCalls == 0);
 
-        // L2 button consumes event and calls onSeek with -1
+        // L2/R2 work without focus
         CHECK(bar.onButtonDown(Button::L2));
         CHECK(seekCalls == 1);
         CHECK(seekDir == -1);
 
-        // R2 button consumes event and calls onSeek with +1
         CHECK(bar.onButtonDown(Button::R2));
         CHECK(seekCalls == 2);
+        CHECK(seekDir == 1);
+
+        // Left/Right when focused
+        fm.setFocus(&bar);
+        CHECK(bar.onButtonDown(Button::Left));
+        CHECK(seekDir == -1);
+        CHECK(bar.onButtonDown(Button::Right));
         CHECK(seekDir == 1);
 
         // When disabled, does not consume L2/R2
         bar.setDisabled(true);
         CHECK_FALSE(bar.onButtonDown(Button::L2));
         CHECK_FALSE(bar.onButtonDown(Button::R2));
-        CHECK(seekCalls == 2);
+        CHECK(seekCalls == 4);
     }
 
-    TEST_CASE("PlaybackControlsRow reflects Play, Pause, and Stop states") {
+    TEST_CASE("PlaybackControlsRow reflects Play and Pause states") {
         MoleculeTestRenderer r;
         Theme theme = createTestTheme();
 
         PlaybackControlsRow controls;
-        CHECK_FALSE(controls.isFocusable());
+        CHECK(controls.isFocusable());
         controls.layout({0, 0, 300, 40});
 
-        // 1. Stopped
-        controls.setPlaybackState(PlaybackState::Stopped);
-        CHECK(controls.playbackState() == PlaybackState::Stopped);
-        r.clearLogs();
-        controls.draw(r, theme);
-        bool foundStopSymbol = false;
-        for (const auto& dt : r.drawTexts) {
-            if (dt.text == "[]") {
-                foundStopSymbol = true;
-                CHECK(dt.color.r == theme.textDisabled.r);
-            }
-        }
-        CHECK(foundStopSymbol);
-
-        // 2. Playing
         controls.setPlaybackState(PlaybackState::Playing);
         CHECK(controls.playbackState() == PlaybackState::Playing);
         r.clearLogs();
@@ -257,7 +250,6 @@ TEST_SUITE("Phase 11 - Molecules") {
         }
         CHECK(foundPlayingSymbol);
 
-        // 3. Paused
         controls.setPlaybackState(PlaybackState::Paused);
         CHECK(controls.playbackState() == PlaybackState::Paused);
         r.clearLogs();

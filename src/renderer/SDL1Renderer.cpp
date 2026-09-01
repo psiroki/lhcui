@@ -282,6 +282,13 @@ FontHandle SDL1Renderer::registerFont(TTF_Font* font) {
     return handle;
 }
 
+void SDL1Renderer::invalidateTextCache() {
+    for (auto& pair : textCache_) {
+        SDL_FreeSurface(pair.second);
+    }
+    textCache_.clear();
+}
+
 } // namespace hui
 
 #endif // HUI_USE_SDL1

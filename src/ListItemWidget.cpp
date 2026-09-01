@@ -84,8 +84,9 @@ void ListItemWidget::draw(IRenderer& renderer, const Theme& theme) {
     if (availWidth <= 0) return;
 
     Color primaryColor = disabled ? theme.textDisabled
+                                  : (row_.destructive ? theme.warning
                                   : (row_.playing ? theme.accent
-                                                  : (rowFocused_ ? theme.textPrimary : theme.textPrimary));
+                                                  : theme.textPrimary));
     Color secondaryColor = disabled ? theme.textDisabled : theme.textSecondary;
 
     if (!row_.secondary.empty() && bounds_.h >= 36) {

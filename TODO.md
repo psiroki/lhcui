@@ -373,59 +373,85 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 
 ## Phase 12 — Level 3 Organisms (Container Widgets & Overlay Views)
 
-- [ ] `ListView` — scrollable vertical list (§12)
-  - [ ] Backed by `IListSource*`, not by an owned item vector (§6.5)
-  - [ ] Owns **one** `ListItemWidget` stamp, refilled per visible row (§6.2)
-  - [ ] `layout()` computes `pageRows_ = max(1, bounds_.h / itemHeight_)` and reclamps scroll (§13.3)
-  - [ ] Draws **only the visible window** `[first, last]`, with a single `pushClip(bounds_)` for the whole viewport — not one clip per row (§6.2)
-  - [ ] D-pad Up/Down moves focus; key-repeat consumed from `onButtonDown`
-  - [ ] L1/R1 page jump by `pageRows_ * itemHeight_` (whole rows, no sub-row drift); L2/R2 jump to first/last item
-  - [ ] Wrap-around at top and bottom; wrap **snaps** the scroll offset rather than travelling through it (§13.3)
-  - [ ] Scroll-to-focus using the bottom-third / top-third formula, with `maxScroll = max(0, totalContentHeight - bounds_.h)` — the floor at 0 is required, not defensive (§13.3)
-  - [ ] `getFocusIndex()` / `setFocusIndex(int, bool scrollToIt)` for focus memory; does not reset on `onBlur()`
-  - [ ] `notifyRowsChanged()`: clamps focus index, reclamps scroll, invalidates the text measurement cache, does **not** move focus (§6.5.1)
-  - [ ] Scrolling does **not** invalidate the text cache (§13.1)
-  - [ ] `ListHeaderWidget` is pinned above the list, outside `bounds_` — the header does not scroll and is not row −1 (§13.3)
-  - [ ] Empty state rendering (placeholder message)
-  - [ ] Scroll indicator (right-side bar)
-- [ ] `GridView` — 2D focusable grid; same source / stamp / window / scroll / wrap / page / memory rules as `ListView`, with a row of cells as the scroll unit (§12)
-- [ ] `TabBarWidget` — horizontal tab strip; L1/R1 to switch tabs; not reachable via D-pad Up/Down; calls `onTabChanged` callback (§12)
-- [ ] `QueueList` — extends `ListView` with grab-mode reorder: Y to grab, Up/Down to reorder, A to drop, B to cancel (§12)
-- [ ] `LetterWheel` — character strip + results list; internal focus routing between strip and list (§12)
-- [ ] `OnScreenKeyboard` — 2D QWERTY grid widget; Confirm / Cancel / Backspace keys; `onCommit` and `onCancel` callbacks (§12)
+> **Molecule rework carried into this phase.** `DESIGN.md` §9.5 (Global Button Map) was added
+> after Phase 11 signed off. It requires every function to be reachable with D-pad + A, which
+> makes two Phase 11 molecules focusable. Their Phase 11 sign-off stands for what was specified
+> at the time; the items below supersede it. Do these **first** — `NowPlayingView` in Phase 13
+> is built on top of them.
+
+- [x] `PlaybackControlsRow` rework — focusable segment group (§9.5, §12)
+  - [x] `isFocusable()` returns `true`; drop it from the unfocusable-chrome examples in code comments
+  - [x] Five segments: previous, play/pause, next, shuffle, repeat
+  - [x] `PlaybackState` reduced to `{ Paused, Playing }` — remove `Stopped`; no modern player exposes a stop transport, and nothing in the app could reach the state
+  - [x] Owns a `ShuffleToggle` and a `RepeatModeToggle` and draws them as its last two segments, instead of the view hand-placing loose toggles
+  - [x] `setShuffle(bool)` / `setRepeatMode(RepeatMode)` inputs alongside `setPlaybackState()`
+  - [x] Left/Right moves the selected segment with wrap-around and is consumed; Up/Down returns `false` so the owning view can move focus off the row (§9.3)
+  - [x] A activates the selected segment via `onActivate(TransportAction)`; returns `false` when unfocused
+  - [x] Selected segment survives `onBlur()` / `onFocus()` (§6.1)
+  - [x] Selection highlight drawn only while the row holds focus, distinct from the playing-state accent
+- [x] `SeekableProgressBar` rework — D-pad reachable seeking (§9.5, §12)
+  - [x] Consumes Left/Right while focused, calling `onSeek` with the same direction contract as L2/R2
+  - [x] Continues to consume L2/R2 whenever the view routes them, focused or not
+  - [x] Still returns `false` for Up/Down
+- [x] `ListView` — scrollable vertical list (§12)
+  - [x] Backed by `IListSource*`, not by an owned item vector (§6.5)
+  - [x] Owns **one** `ListItemWidget` stamp, refilled per visible row (§6.2)
+  - [x] `layout()` computes `pageRows_ = max(1, bounds_.h / itemHeight_)` and reclamps scroll (§13.3)
+  - [x] Draws **only the visible window** `[first, last]`, with a single `pushClip(bounds_)` for the whole viewport — not one clip per row (§6.2)
+  - [x] D-pad Up/Down moves focus; key-repeat consumed from `onButtonDown`
+  - [x] L1/R1 page jump by `pageRows_ * itemHeight_` (whole rows, no sub-row drift); L2/R2 jump to first/last item
+  - [x] Wrap-around at top and bottom; wrap **snaps** the scroll offset rather than travelling through it (§13.3)
+  - [x] Scroll-to-focus using the bottom-third / top-third formula, with `maxScroll = max(0, totalContentHeight - bounds_.h)` — the floor at 0 is required, not defensive (§13.3)
+  - [x] `getFocusIndex()` / `setFocusIndex(int, bool scrollToIt)` for focus memory; does not reset on `onBlur()`
+  - [x] `notifyRowsChanged()`: clamps focus index, reclamps scroll, invalidates the text measurement cache, does **not** move focus (§6.5.1)
+  - [x] Scrolling does **not** invalidate the text cache (§13.1)
+  - [x] `ListHeaderWidget` is pinned above the list, outside `bounds_` — the header does not scroll and is not row −1 (§13.3)
+  - [x] Empty state rendering (placeholder message)
+  - [x] Scroll indicator (right-side bar)
+- [x] `GridView` — 2D focusable grid; same source / stamp / window / scroll / wrap / page / memory rules as `ListView`, with a row of cells as the scroll unit (§12)
+- [x] `TabBarWidget` — horizontal tab strip; L1/R1 to switch tabs; not reachable via D-pad Up/Down; calls `onTabChanged` callback (§12)
+- [x] `QueueList` — extends `ListView` with grab-mode reorder: Y to grab, Up/Down to reorder, A to drop, B to cancel (§12)
+- [x] `LetterWheel` — character strip + results list; internal focus routing between strip and list (§12)
+- [x] `OnScreenKeyboard` — 2D QWERTY grid widget; Confirm / Cancel / Backspace keys; `onCommit` and `onCancel` callbacks (§12)
 > **All four overlays below:** `dimsBelow()` returns `true`, and none of them draws its own
 > full-screen fill — `ViewStack` lays down the single scrim (§8.2, §8.3). Drawing both
 > double-darkens the background. Each pops itself from its own handler, which is safe only
 > because `ViewStack` mutations are deferred (§8.2).
 
-- [ ] `ContextMenuView` — overlay `View`; backed by a `VectorListSource`; action list with destructive color support; B cancels (§12)
-- [ ] `ConfirmationDialogView` — overlay `View`; `NavList` with `Axis::Horizontal`, wrap off, default index 0 (Cancel); A activates the focused option, B cancels from either (§12, §7.3)
-- [ ] `TrackInfoPanelView` — overlay `View`; read-only metadata table (§12)
-- [ ] `GuideOverlayView` — overlay `View` sliding in from right; `NavList` with `Axis::Vertical` over both `Slider`s and the action items as one unified focus list; Left/Right falls through `NavList` to the focused `Slider` and is ignored on action items; animation degrades to instant when `setAnimationsEnabled(false)` (§12, §7.3, §13.6)
+- [x] `ContextMenuView` — overlay `View`; backed by a `VectorListSource`; action list with destructive color support; B cancels (§12)
+- [x] `ConfirmationDialogView` — overlay `View`; `NavList` with `Axis::Horizontal`, wrap off, default index 0 (Cancel); A activates the focused option, B cancels from either (§12, §7.3)
+- [x] `TrackInfoPanelView` — overlay `View`; read-only metadata table (§12)
+- [x] `GuideOverlayView` — overlay `View` sliding in from right; `NavList` with `Axis::Vertical` over both `Slider`s and the action items as one unified focus list; Left/Right falls through `NavList` to the focused `Slider` and is ignored on action items; animation degrades to instant when `setAnimationsEnabled(false)` (§12, §7.3, §13.6)
 
 ### ✅ QA Sign-off — Phase 12
 
 > **Testing team:** confirm all items below before marking this phase done.
 
-- [ ] `ListView` Up/Down moves focus one item at a time; wrap-around from the last item lands on the first and vice versa
-- [ ] `ListView` L1/R1 jumps exactly one visible page; L2 jumps to index 0; R2 jumps to the last index
-- [ ] `ListView` scroll-to-focus: after moving focus down past the bottom third of the viewport, the list scrolls so the focused item remains visible; same behaviour moving upward past the top third
-- [ ] `ListView` blur then re-focus: `getFocusIndex()` returns the same index it had before blur; the list does not scroll back to the top
-- [ ] `ListView` with zero items renders a non-empty placeholder message and does not crash
-- [ ] `GridView` Left/Right/Up/Down navigate the grid; wrap-around at row and column edges behaves consistently with `ListView`
-- [ ] `TabBarWidget` L1/R1 cycles through tabs and calls `onTabChanged`; pressing D-pad Up/Down while the tab bar is focused does not move focus away from it
-- [ ] `QueueList` grab mode: press Y to grab an item; Up/Down reorders it; A drops it in the new position; B cancels and the item returns to its original index
-- [ ] `ContextMenuView` shows the overlay background fill and the action list; pressing B dismisses it; a destructive action renders in `theme.warning` color
-- [ ] `ConfirmationDialogView` opens with focus on Cancel; Left/Right moves focus between Cancel and Confirm; A on Confirm confirms; B cancels from either button
-- [ ] `ConfirmationDialogView` Left at Cancel and Right at Confirm do **not** wrap
+- [x] `PlaybackControlsRow` accepts focus; Left/Right cycles all five segments and wraps at both ends; Up/Down is not consumed
+- [x] A on each segment fires `onActivate` with the matching `TransportAction` exactly once, and every one of the five is reachable using only D-pad and A
+- [x] `PlaybackControlsRow` blurred mid-row then re-focused resumes on the same segment, not on segment 0
+- [x] `PlaybackState` has exactly two enumerators; grep confirms no `Stopped` remains in `include/`, `src/`, `tests/` or `example/`
+- [x] `SeekableProgressBar` calls `onSeek` for Left/Right while focused and for L2/R2 regardless of focus; still returns `false` for Up/Down
+- [x] No dead focus stop (§9.3): with each of the seek bar and the transport row focused in turn, every D-pad direction either performs an action or moves focus
+- [x] `ListView` Up/Down moves focus one item at a time; wrap-around from the last item lands on the first and vice versa
+- [x] `ListView` L1/R1 jumps exactly one visible page; L2 jumps to index 0; R2 jumps to the last index
+- [x] `ListView` scroll-to-focus: after moving focus down past the bottom third of the viewport, the list scrolls so the focused item remains visible; same behaviour moving upward past the top third
+- [x] `ListView` blur then re-focus: `getFocusIndex()` returns the same index it had before blur; the list does not scroll back to the top
+- [x] `ListView` with zero items renders a non-empty placeholder message and does not crash
+- [x] `GridView` Left/Right/Up/Down navigate the grid; wrap-around at row and column edges behaves consistently with `ListView`
+- [x] `TabBarWidget` L1/R1 cycles through tabs and calls `onTabChanged`; pressing D-pad Up/Down while the tab bar is focused does not move focus away from it
+- [x] `QueueList` grab mode: press Y to grab an item; Up/Down reorders it; A drops it in the new position; B cancels and the item returns to its original index
+- [x] `ContextMenuView` shows the overlay background fill and the action list; pressing B dismisses it; a destructive action renders in `theme.warning` color
+- [x] `ConfirmationDialogView` opens with focus on Cancel; Left/Right moves focus between Cancel and Confirm; A on Confirm confirms; B cancels from either button
+- [x] `ConfirmationDialogView` Left at Cancel and Right at Confirm do **not** wrap
 - [ ] `GuideOverlayView` Up/Down traverses sliders and action items as one list; Left/Right on a slider adjusts by 5; Left/Right on an action item does nothing and does not move focus
-- [ ] Each overlay draws no full-screen fill of its own: with one modal open, the instrumented renderer sees exactly **one** full-screen `fillRect`
+- [x] Each overlay draws no full-screen fill of its own: with one modal open, the instrumented renderer sees exactly **one** full-screen `fillRect`
 - [ ] `ListView` with 5,000 rows: the instrumented renderer sees at most `pageRows_ + 2` row draws per frame, and exactly one `pushClip`/`popClip` pair for the list body
 - [ ] `ListView` scrolling continuously for 5 s: the text measurement cache hit rate stays high (instrument it) — a rate near zero means the cache is keyed on position rather than content (§13.1)
 - [ ] `ListView` with a list shorter than the viewport: `scrollOffset_` stays 0 and no undefined-behaviour clamp occurs (build with UBSan)
-- [ ] `ListView` insert-while-suspended: focus index 7, insert a row at index 3, `notifyRowsChanged()` — focus stays at index 7 (now a different row) and nothing crashes; `setFocusIndex(3)` then highlights the inserted row
+- [x] `ListView` insert-while-suspended: focus index 7, insert a row at index 3, `notifyRowsChanged()` — focus stays at index 7 (now a different row) and nothing crashes; `setFocusIndex(3)` then highlights the inserted row
 - [ ] `GuideOverlayView` slides in from the right under SDL2; with `setAnimationsEnabled(false)` it appears instantly with no intermediate animation frames
-- [ ] `OnScreenKeyboard` Backspace deletes the last typed character; Confirm calls `onCommit` with the full typed string; Cancel calls `onCancel` without modifying the string
+- [x] `OnScreenKeyboard` Backspace deletes the last typed character; Confirm calls `onCommit` with the full typed string; Cancel calls `onCancel` without modifying the string
 
 ---
 

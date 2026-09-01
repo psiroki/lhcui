@@ -55,6 +55,10 @@ public:
 
     // --- Querying ---
     virtual Size screenSize() const = 0;
+
+    // --- Text cache (§13.1) ---
+    // Called by list containers when row data changes. Default is a no-op.
+    virtual void invalidateTextCache() {}
 };
 
 } // namespace hui

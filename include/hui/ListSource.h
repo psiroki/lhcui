@@ -27,8 +27,9 @@ struct RowData {
     std::string_view rightMeta;
     ListItemVariant  variant  = ListItemVariant::Default;
     TextureHandle    icon     = 0;
-    bool             playing  = false;
-    bool             disabled = false;
+    bool             playing     = false;
+    bool             disabled    = false;
+    bool             destructive = false;
 };
 
 class IListSource {
@@ -47,7 +48,8 @@ public:
              ListItemVariant variant = ListItemVariant::Default,
              TextureHandle icon = 0,
              bool playing = false,
-             bool disabled = false);
+             bool disabled = false,
+             bool destructive = false);
 
     void clear();
 
@@ -63,6 +65,7 @@ private:
         TextureHandle icon = 0;
         bool playing = false;
         bool disabled = false;
+        bool destructive = false;
     };
 
     std::vector<Entry> entries_;

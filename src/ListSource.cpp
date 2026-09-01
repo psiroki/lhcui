@@ -8,7 +8,8 @@ void VectorListSource::add(std::string primary,
                            ListItemVariant variant,
                            TextureHandle icon,
                            bool playing,
-                           bool disabled) {
+                           bool disabled,
+                           bool destructive) {
     entries_.push_back(Entry{
         std::move(primary),
         std::move(secondary),
@@ -16,7 +17,8 @@ void VectorListSource::add(std::string primary,
         variant,
         icon,
         playing,
-        disabled
+        disabled,
+        destructive
     });
 }
 
@@ -41,6 +43,7 @@ void VectorListSource::rowAt(int index, RowData& out) const {
     out.icon = entry.icon;
     out.playing = entry.playing;
     out.disabled = entry.disabled;
+    out.destructive = entry.destructive;
 }
 
 } // namespace hui

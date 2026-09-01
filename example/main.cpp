@@ -162,11 +162,35 @@ public:
 
         // Setup PlaybackControlsRow
         playbackControls_.setPlaybackState(playbackState_);
+        playbackControls_.setShuffle(true);
+        playbackControls_.setRepeatMode(hui::RepeatMode::All);
+        playbackControls_.setOnActivate([this](hui::TransportAction action) {
+            switch (action) {
+                case hui::TransportAction::Previous:
+                    if (g_toast) g_toast->show("Previous track", 1.0f);
+                    break;
+                case hui::TransportAction::PlayPause:
+                    playbackState_ = (playbackState_ == hui::PlaybackState::Playing)
+                        ? hui::PlaybackState::Paused : hui::PlaybackState::Playing;
+                    playbackControls_.setPlaybackState(playbackState_);
+                    break;
+                case hui::TransportAction::Next:
+                    if (g_toast) g_toast->show("Next track", 1.0f);
+                    break;
+                case hui::TransportAction::Shuffle:
+                    shuffleOn_ = !shuffleOn_;
+                    playbackControls_.setShuffle(shuffleOn_);
+                    break;
+                case hui::TransportAction::Repeat:
+                    repeatMode_ = static_cast<hui::RepeatMode>(
+                        (static_cast<int>(repeatMode_) + 1) % 3);
+                    playbackControls_.setRepeatMode(repeatMode_);
+                    break;
+            }
+        });
 
-        // Setup Toggles
+        // Setup Sort indicator
         sortIndicator_.setMode("Track #");
-        shuffleToggle_.setShuffle(true);
-        repeatModeToggle_.setMode(hui::RepeatMode::All);
 
         // Setup Grid Stamps
         gridCell1_.setCell("Metropolis Pt. 2", "1999", 0, false, false);
@@ -190,11 +214,9 @@ public:
         volumeSlider_.layout({bounds_.x + 10, y, bounds_.w - 20, 28});
         y += 34;
 
-        // 4. Playback Controls Row & Toggles container
+        // 4. Playback Controls Row
         playbackRowBounds_ = {bounds_.x + 10, y, bounds_.w - 20, 36};
-        playbackControls_.layout({playbackRowBounds_.x + 80, playbackRowBounds_.y, playbackRowBounds_.w - 280, 36});
-        shuffleToggle_.layout({playbackRowBounds_.x + playbackRowBounds_.w - 180, playbackRowBounds_.y + 6, 24, 24});
-        repeatModeToggle_.layout({playbackRowBounds_.x + playbackRowBounds_.w - 140, playbackRowBounds_.y + 6, 24, 24});
+        playbackControls_.layout(playbackRowBounds_);
         sortIndicator_.layout({playbackRowBounds_.x + playbackRowBounds_.w - 100, playbackRowBounds_.y + 6, 90, 24});
         y += 42;
 
@@ -214,7 +236,9 @@ public:
             fm.setFocus(&seekableProgress_);
         } else if (focusIndex_ == 1 && fm.focused() != &volumeSlider_) {
             fm.setFocus(&volumeSlider_);
-        } else if (focusIndex_ >= 2 && fm.focused() != nullptr) {
+        } else if (focusIndex_ == 2 && fm.focused() != &playbackControls_) {
+            fm.setFocus(&playbackControls_);
+        } else if (focusIndex_ >= 3 && fm.focused() != nullptr) {
             fm.setFocus(nullptr);
         }
     }
@@ -232,18 +256,8 @@ public:
         // 3. Draw Volume Slider
         volumeSlider_.draw(r, theme);
 
-        // 4. Draw Playback Controls & Toggles section
-        bool isPlaybackFocused = (focusIndex_ == 2);
-        r.fillRect(playbackRowBounds_, isPlaybackFocused ? theme.focusFillColor : theme.surface);
-        if (isPlaybackFocused) {
-            r.drawRect(playbackRowBounds_, theme.focusBorderColor, theme.focusBorderWidth);
-        } else {
-            r.drawRect(playbackRowBounds_, theme.surfaceAlt, 1);
-        }
-        r.drawText("Transport:", {playbackRowBounds_.x + 10, playbackRowBounds_.y + 10}, theme.fontSmall, theme.textSecondary);
+        // 4. Draw Playback Controls
         playbackControls_.draw(r, theme);
-        shuffleToggle_.draw(r, theme);
-        repeatModeToggle_.draw(r, theme);
         sortIndicator_.draw(r, theme);
 
         // 5. Action Buttons (Toast & Modal)
@@ -310,23 +324,11 @@ public:
             return volumeSlider_.onButtonDown(b);
         }
 
-        if (b == hui::Button::A) {
-            if (focusIndex_ == 2) {
-                // Cycle playback state
-                if (playbackState_ == hui::PlaybackState::Playing) playbackState_ = hui::PlaybackState::Paused;
-                else if (playbackState_ == hui::PlaybackState::Paused) playbackState_ = hui::PlaybackState::Stopped;
-                else playbackState_ = hui::PlaybackState::Playing;
+        if (focusIndex_ == 2) {
+            return playbackControls_.onButtonDown(b);
+        }
 
-                playbackControls_.setPlaybackState(playbackState_);
-                shuffleToggle_.toggle();
-                repeatModeToggle_.cycle();
-                if (g_toast) {
-                    const char* st = (playbackState_ == hui::PlaybackState::Playing ? "Playing" :
-                                     (playbackState_ == hui::PlaybackState::Paused ? "Paused" : "Stopped"));
-                    g_toast->show(std::string("Playback: ") + st, 1.2f);
-                }
-                return true;
-            }
+        if (b == hui::Button::A) {
             if (focusIndex_ == 3) {
                 if (g_toast) {
                     g_toast->show("Toast Notification #" + std::to_string(g_toastCounter++), 2.5f);
@@ -369,9 +371,9 @@ private:
     hui::SeekableProgressBar seekableProgress_;
     hui::Slider volumeSlider_;
     hui::PlaybackControlsRow playbackControls_;
-    hui::ShuffleToggle shuffleToggle_;
-    hui::RepeatModeToggle repeatModeToggle_;
     hui::SortModeIndicator sortIndicator_;
+    bool shuffleOn_ = true;
+    hui::RepeatMode repeatMode_ = hui::RepeatMode::All;
 
     hui::GridCellWidget gridCell1_;
     hui::GridCellWidget gridCell2_;

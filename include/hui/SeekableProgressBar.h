@@ -7,8 +7,9 @@ namespace hui {
 
 // §12 SeekableProgressBar
 //
-// Extends ProgressBar; consumes L2/R2 button events and calls onSeek callback.
-// Focusable (isFocusable() == true). Returns false for all non-seek buttons.
+// Extends ProgressBar; consumes Left/Right while focused and L2/R2 whenever
+// the owning view routes them, calling onSeek in both cases.
+// Returns false for Up/Down so the view can move focus off it.
 class SeekableProgressBar : public ProgressBar {
 public:
     SeekableProgressBar() = default;

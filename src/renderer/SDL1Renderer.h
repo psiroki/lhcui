@@ -41,6 +41,8 @@ public:
 
     Size screenSize() const override;
 
+    void invalidateTextCache() override;
+
     // Optional helpers to register fonts
     FontHandle registerFont(TTF_Font* font);
 

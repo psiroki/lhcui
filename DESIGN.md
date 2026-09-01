@@ -612,10 +612,9 @@ Traversal does not live here (see §7.3).
 
 In this application there is at most one focusable widget per screen in the common case —
 `DirectoryView` has a `ListView`; `LibraryView` has a `ListView` or a `GridView` per tab,
-with the `TabBarWidget` reachable only via L1/R1 and never by D-pad; `NowPlayingView` treats
-the whole screen as one focus context. The two exceptions (`ConfirmationDialogView`,
-`GuideOverlayView`) are handled by `NavList`, §7.3. Do not grow `FocusManager` beyond what
-follows.
+with the `TabBarWidget` reachable only via L1/R1 and never by D-pad. The exceptions
+(`NowPlayingView`, `ConfirmationDialogView`, `GuideOverlayView`) are handled by `NavList`,
+§7.3. Do not grow `FocusManager` beyond what follows.
 
 ```cpp
 class FocusManager {
@@ -625,8 +624,8 @@ public:
     //
     // Refuses and returns false, leaving focus unchanged, if w is non-null and
     // either !w->isFocusable() or w->isDisabled(). This makes it structurally
-    // impossible to focus chrome (HintBarWidget, StatusBarWidget, ListHeaderWidget,
-    // PlaybackControlsRow) or a disabled control.
+    // impossible to focus chrome (HintBarWidget, StatusBarWidget, ListHeaderWidget)
+    // or a disabled control.
     //
     // setFocus(nullptr) always succeeds: it blurs the current owner and leaves
     // focus unowned.
@@ -1054,8 +1053,15 @@ Views that traverse an ordered set of heterogeneous children should delegate tha
 **Consume discipline.** A handler returns `true` if and only if it acted on the event.
 Returning `true` for an event you ignored silently swallows it; returning `false` for an
 event you acted on lets it fire twice. The most common mistake is a container returning
-`true` for the whole directional group when it only handled one axis — see
-`SeekableProgressBar`, which must return `false` for everything except L2/R2.
+`true` for the whole directional group when it only handled one axis: a widget that acts on
+Left/Right must still return `false` for Up/Down, or the view above it can never move focus
+off it. `SeekableProgressBar` and `PlaybackControlsRow` are both in this position.
+
+**No dead focus stops.** The inverse mistake is subtler and worse. If a widget can hold
+focus, every directional press that reaches it must either do something or move focus
+somewhere. A focusable widget that ignores Left/Right while the view above it also ignores
+them leaves the user pressing a button that does nothing, with a focus highlight promising
+otherwise. Either the widget acts on the input, or it must not be a focus stop.
 
 ### 9.4 Button Chords
 
@@ -1085,6 +1091,90 @@ with a real Guide button can leave it registered harmlessly, or clear it.
 Chord detection necessarily delays the individual buttons by up to `kChordWindow`. This is
 acceptable for Start and Select, which are never used in time-critical interactions; do not
 register chords involving directional or face buttons.
+
+A button that participates in a chord does not emit its solo press on `onButtonDown`. It
+emits on release, once the detector knows no chord formed. Both Start and Select carry solo
+bindings (§9.5), so both behave this way. Two consequences bind the implementation:
+
+- A chord-input button can never drive a held or repeating action. Only bind it to
+  discrete, idempotent actions.
+- The solo `Down` is queued into `pendingEvents_` and flushed from `UISystem::update()`,
+  while the `Up` dispatches immediately from `onButtonUp`. The detector must emit the
+  deferred `Down` **before** the `Up` that released it; a view that latches on Down/Up
+  pairs would otherwise observe them inverted.
+
+### 9.5 Global Button Map
+
+This section is authoritative. Where it disagrees with the widget guide, it wins, and the
+deviations are called out in place.
+
+Two rules govern every binding below.
+
+**Reachability.** Every function in the application must be operable with D-pad + A alone,
+with B cancelling wherever cancelling is meaningful. A shortcut is an accelerator for a
+function that is already reachable by navigation — it is never the only path to one. A
+control that exists solely as a button combination is undiscoverable: the hint bar shows at
+most five entries (§13.4), so the button map cannot be self-documenting beyond that.
+
+**Physical stability.** X and Y are mirrored between Nintendo-layout and Xbox-layout
+handhelds, and this library targets both. No binding whose position the user must learn may
+live on X or Y. A and B are anchored by convention on every device; the shoulders, Start and
+Select are unambiguous everywhere.
+
+Global — the same on every screen unless a modal overrides it:
+
+| Button | Action |
+|--------|--------|
+| A | Activate the focused element |
+| B | Back, cancel, dismiss the top overlay |
+| X | Context menu for the focused item |
+| Y | No global binding. View-specific (`QueueList` grab mode, §12) |
+| Start | Play/pause toggle |
+| Select | Jump to `NowPlayingView` |
+| Guide, or Start+Select | Guide overlay (§9.4) |
+
+`NowPlayingView`:
+
+| Button | Action |
+|--------|--------|
+| Up/Down | Move focus between the seek bar, the transport row, and the queue |
+| Left/Right | Seek, when the seek bar holds focus; otherwise move between transport segments |
+| A | Activate the focused transport segment, or play the focused queue entry |
+| L1 / R1 | Previous / next track |
+| L2 / R2 | Seek backward / forward, with key repeat (§9.2) |
+
+Every transport function — previous, play/pause, next, shuffle, repeat — is a focusable
+segment of `PlaybackControlsRow`, and seeking is Left/Right on the focused seek bar. All of it is reachable with D-pad + A. Start, L1, R1, L2 and R2 duplicate a subset as
+accelerators and work regardless of what currently holds focus.
+
+`ListView` and `GridView` keep the widget guide's bindings: L1/R1 page up/down, L2/R2 jump
+to first/last item.
+
+**Overlays suppress the global shortcuts.** While any overlay is on top of the stack, Start,
+Select and the shoulders belong to that overlay and to nothing else. `ViewStack` already
+delivers input only to `top()` (§9.3), so this falls out of the routing model rather than
+needing a guard — but it means the transport accelerators are unavailable with a context
+menu open, which is correct: the user is in the middle of something. The one explicit
+collision is `OnScreenKeyboard`, where the widget guide §6.2 binds Start to Confirm; the
+keyboard is always modal, so Confirm wins for as long as it is open.
+
+**Shoulder conflict inside `NowPlayingView`.** The transport claims all four shoulders, so
+the embedded `QueueList` does not receive page-jump or first/last. The view intercepts the
+shoulders before delegating to the focused child, per the explicit-routing rule in §9.3. A
+play queue is short enough that losing page-jump costs the user nothing, and track skip is
+reached far more often than a page of queue.
+
+**Deviations from the widget guide.** Guide §5.3 declares `PlaybackControlsRow`
+non-interactive and the Now Playing screen a single focus context; the reachability rule
+overrides both, and the row is focusable per §12. Guide §5.4 binds shuffle to Y and §5.5
+implies a shortcut for repeat cycling; both shortcuts are dropped. They are set-and-forget
+settings, they are reachable in the transport row, and dropping them keeps Y free for
+`QueueList` grab mode and X free for the context menu on every screen.
+
+**Volume** has no shortcut. It is reached through the guide overlay (§12,
+`GuideOverlayView`), which is one button away. Devices in this class normally carry hardware
+volume keys; if a target does not, the application may bind volume itself, but the library
+reserves nothing for it.
 
 ---
 
@@ -1340,16 +1430,16 @@ noted. Views are `View` subclasses.
 | `ProgressBar` | Read-only horizontal fill bar with elapsed/total timestamps. |
 | `Slider` | Focusable horizontal value control driven by Left/Right. |
 | `SortModeIndicator` | Non-focusable badge showing current sort mode. |
-| `ShuffleToggle` | Non-focusable icon with on/off visual state. |
-| `RepeatModeToggle` | Non-focusable icon cycling off → all → one. |
+| `ShuffleToggle` | Non-focusable icon with on/off visual state. Rendered standalone, or as a segment of `PlaybackControlsRow`. |
+| `RepeatModeToggle` | Non-focusable icon cycling off → all → one. Rendered standalone, or as a segment of `PlaybackControlsRow`. |
 
 ### Level 2 — Molecules
 
 | Widget | Description |
 |--------|-------------|
 | `ListHeaderWidget` | Non-focusable context row: icon, label (left-truncated for paths), item count, sort badge. |
-| `SeekableProgressBar` | Extends `ProgressBar`; consumes L2/R2 button events and calls `onSeek`. |
-| `PlaybackControlsRow` | Non-focusable visual row of transport icons reflecting playback state. |
+| `SeekableProgressBar` | Focusable. Extends `ProgressBar`. Consumes Left/Right while focused, and L2/R2 whenever the owning view routes them, calling `onSeek` in both cases. Returns `false` for Up/Down so the view can move focus off it. Key repeat applies to all four (§9.2). |
+| `PlaybackControlsRow` | **Focusable** horizontal group of five transport segments: previous, play/pause, next, shuffle, repeat. There is no stop segment and no stopped state — `PlaybackState` is `{ Paused, Playing }`. Owns a `ShuffleToggle` and a `RepeatModeToggle` for its last two segments. Left/Right moves the selected segment, wrapping (§1.3 of the widget guide), and is consumed. A activates the selected segment through `onActivate(TransportAction)`. Renders the playback state, shuffle state and repeat mode passed in, plus a selection highlight on the current segment when the row holds focus. Retains its selected segment across blur/focus (§6.1). See §9.5; this supersedes the widget guide §5.3, which declares the row non-interactive. |
 | `HintBarWidget` | Non-focusable bar at screen bottom. Reads `currentHints()` from the active View each frame. Renders button glyphs with per-button color coding. |
 | `StatusBarWidget` | Non-focusable top bar: view mode, context label, now-playing pulse indicator, clock, battery. |
 | `ToastNotification` | Non-focusable **Widget owned by `Shell`** — never pushed onto the ViewStack. Self-timed via `update()`. Auto-dismissed; replacement policy (not stacked). Drawn in the Shell overlay layer, above everything and never dimmed. |
@@ -1422,7 +1512,7 @@ without stealing focus, which is also why it must not be a View: a pushed toast 
 |------|-------------|
 | `DirectoryView` | ListView, ListHeaderWidget, pushes ContextMenuView / TrackInfoPanelView / ToastNotification |
 | `LibraryView` | ListView + GridView + TabBarWidget, pushes ContextMenuView / LetterWheel / TrackInfoPanelView |
-| `NowPlayingView` | SeekableProgressBar, PlaybackControlsRow, QueueList, pushes ContextMenuView / TrackInfoPanelView |
+| `NowPlayingView` | SeekableProgressBar, PlaybackControlsRow, QueueList, traversed vertically by a `NavList` (§7.3); intercepts L1/R1/L2/R2 before the queue (§9.5); pushes ContextMenuView / TrackInfoPanelView |
 
 ---
 
