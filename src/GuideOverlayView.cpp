@@ -63,8 +63,24 @@ void GuideOverlayView::layout(Rect contentRect) {
     closeBtn_.layout({panelBounds_.x + pad, y, panelBounds_.w - 2 * pad, rowH});
 }
 
+bool GuideOverlayView::isActionItem(const Widget* w) const {
+    return w == &equalizerBtn_ || w == &settingsBtn_ || w == &closeBtn_;
+}
+
+void GuideOverlayView::syncNavFocus(FocusManager& fm) {
+    int idx = nav_.index();
+    if (idx < 0) {
+        idx = 0;
+    }
+    Widget* expected = nav_.current();
+    if (!expected || !fm.hasFocus(expected)) {
+        nav_.focusIndex(idx, fm);
+    }
+}
+
 void GuideOverlayView::update(float dt, FocusManager& fm) {
-    (void)fm;
+    syncNavFocus(fm);
+
     if (!animationsEnabled_) {
         slideOffset_ = 0.0f;
         return;
@@ -133,13 +149,15 @@ bool GuideOverlayView::onButtonDown(Button b, FocusManager& fm) {
         }
     }
 
+    if (current && isActionItem(current) && (b == Button::Left || b == Button::Right)) {
+        return true;
+    }
+
     if (nav_.handleButton(b, fm)) {
         return true;
     }
 
-    if (!fm.hasFocus(nav_.current())) {
-        nav_.focusIndex(0, fm);
-    }
+    syncNavFocus(fm);
 
     return false;
 }

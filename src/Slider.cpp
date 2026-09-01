@@ -73,37 +73,48 @@ void Slider::draw(IRenderer& renderer, const Theme& theme) {
         curX += sz.w + 12;
     }
 
-    // Value text on right
-    std::string valStr = std::to_string(value_);
-    Size valSz = renderer.measureText(valStr, theme.fontSmall);
-    int valX = bounds_.x + bounds_.w - pad - valSz.w;
-    int valY = bounds_.y + (bounds_.h - valSz.h) / 2;
-    renderer.drawText(valStr, {valX, valY}, theme.fontSmall, disabled ? theme.textDisabled : theme.textSecondary);
+    // Value text on right — reserve width for max() so the track does not resize
+    // when the digit count changes (e.g. 95 → 100).
+    const std::string maxValStr = std::to_string(max_);
+    const Size valSlotSz = renderer.measureText(maxValStr, theme.fontSmall);
+    const int valSlotX = bounds_.x + bounds_.w - pad - valSlotSz.w;
+
+    const std::string valStr = std::to_string(value_);
+    const Size valSz = renderer.measureText(valStr, theme.fontSmall);
+    const int valX = valSlotX + (valSlotSz.w - valSz.w);
+    const int valY = bounds_.y + (bounds_.h - valSz.h) / 2;
+    renderer.drawText(valStr, {valX, valY}, theme.fontSmall,
+                      disabled ? theme.textDisabled : theme.textSecondary);
 
     // Track in middle
     int trackX = curX;
-    int trackW = std::max(0, valX - 12 - trackX);
+    int trackW = std::max(0, valSlotX - 12 - trackX);
     int trackH = 6;
     int trackY = bounds_.y + (bounds_.h - trackH) / 2;
 
     if (trackW > 0) {
         renderer.fillRect({trackX, trackY, trackW, trackH}, theme.surfaceAlt);
 
-        float ratio = (max_ > min_) ? static_cast<float>(value_ - min_) / static_cast<float>(max_ - min_) : 0.0f;
-        ratio = std::clamp(ratio, 0.0f, 1.0f);
-        int fillW = static_cast<int>(trackW * ratio);
+        const int thumbW = 8;
+        const int thumbH = 14;
+        const int thumbTravel = std::max(0, trackW - thumbW);
+
+        int thumbX = trackX;
+        if (thumbTravel > 0 && max_ > min_) {
+            thumbX = trackX + (value_ - min_) * thumbTravel / (max_ - min_);
+        }
+
+        int fillW = thumbX + thumbW / 2 - trackX;
+        fillW = std::clamp(fillW, 0, trackW);
 
         Color fillCol = disabled ? theme.textDisabled : (isFocused() ? theme.accent : theme.textSecondary);
         if (fillW > 0) {
             renderer.fillRect({trackX, trackY, fillW, trackH}, fillCol);
         }
 
-        // Thumb knob
-        int thumbW = 8;
-        int thumbH = 14;
-        int thumbX = std::clamp(trackX + fillW - thumbW / 2, trackX, trackX + trackW - thumbW);
         int thumbY = bounds_.y + (bounds_.h - thumbH) / 2;
-        renderer.fillRect({thumbX, thumbY, thumbW, thumbH}, (isFocused() && !disabled) ? theme.textPrimary : theme.textSecondary);
+        renderer.fillRect({thumbX, thumbY, thumbW, thumbH},
+                          (isFocused() && !disabled) ? theme.textPrimary : theme.textSecondary);
     }
 }
 

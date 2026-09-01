@@ -53,6 +53,8 @@ private:
 
     void finishOpen();
     void activateFocused();
+    void syncNavFocus(FocusManager& fm);
+    bool isActionItem(const Widget* w) const;
 
     ViewStack& stack_;
     bool animationsEnabled_;

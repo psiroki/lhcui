@@ -24,6 +24,10 @@
 #include "hui/StatusBarWidget.h"
 #include "hui/ToastNotification.h"
 
+// Phase 12 Organisms
+#include "hui/ListView.h"
+#include "hui/GuideOverlayView.h"
+
 #ifdef HUI_ENABLE_KEYBOARD_FALLBACK
 #include "hui/sdl/KeyboardFallback.h"
 #endif
@@ -43,6 +47,8 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <unordered_set>
+#include <sstream>
 
 namespace example {
 
@@ -126,6 +132,623 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// Phase 12 QA — helpers and test views (manual sign-off harness)
+// ---------------------------------------------------------------------------
+
+class CountingListSource : public hui::IListSource {
+public:
+    explicit CountingListSource(int count) : count_(count) {
+        rows_.reserve(static_cast<size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            rows_.push_back({"Row " + std::to_string(i), "Secondary " + std::to_string(i)});
+        }
+    }
+
+    int rowCount() const override { return count_; }
+
+    void rowAt(int index, hui::RowData& out) const override {
+        ++rowAtCalls_;
+        const auto& row = rows_[static_cast<size_t>(index)];
+        out.primary = row.first;
+        out.secondary = row.second;
+        out.variant = hui::ListItemVariant::Track;
+    }
+
+    void resetRowAtCounter() { rowAtCalls_ = 0; }
+    int rowAtCalls() const { return rowAtCalls_; }
+
+private:
+    int count_;
+    mutable int rowAtCalls_ = 0;
+    std::vector<std::pair<std::string, std::string>> rows_;
+};
+
+class RendererProbe : public hui::IRenderer {
+public:
+    explicit RendererProbe(hui::IRenderer& inner) : inner_(inner) {}
+
+    int pushClipCount = 0;
+    int popClipCount = 0;
+    int drawTextCalls = 0;
+    int drawTextCacheHits = 0;
+
+    void resetFrameCounters() {
+        pushClipCount = 0;
+        popClipCount = 0;
+    }
+
+    void resetCacheStats() {
+        drawTextCalls = 0;
+        drawTextCacheHits = 0;
+        seenDrawKeys_.clear();
+    }
+
+    float cacheHitRate() const {
+        if (drawTextCalls == 0) {
+            return 0.0f;
+        }
+        return 100.0f * static_cast<float>(drawTextCacheHits) / static_cast<float>(drawTextCalls);
+    }
+
+    void beginFrame() override { inner_.beginFrame(); }
+    void endFrame() override { inner_.endFrame(); }
+
+    void pushClip(hui::Rect r) override {
+        ++pushClipCount;
+        inner_.pushClip(r);
+    }
+    void popClip() override {
+        ++popClipCount;
+        inner_.popClip();
+    }
+
+    void fillRect(hui::Rect r, hui::Color c) override { inner_.fillRect(r, c); }
+    void drawRect(hui::Rect r, hui::Color c, int thickness = 1) override {
+        inner_.drawRect(r, c, thickness);
+    }
+    void drawLine(hui::Point a, hui::Point b, hui::Color c) override { inner_.drawLine(a, b, c); }
+
+    int drawText(std::string_view text, hui::Point origin, hui::FontHandle font,
+                 hui::Color color) override {
+        ++drawTextCalls;
+        std::string key = std::string(text) + "|" + std::to_string(font) + "|" +
+                          std::to_string(color.r) + "," + std::to_string(color.g) + "," +
+                          std::to_string(color.b) + "," + std::to_string(color.a);
+        if (seenDrawKeys_.count(key) != 0) {
+            ++drawTextCacheHits;
+        } else {
+            seenDrawKeys_.insert(std::move(key));
+        }
+        return inner_.drawText(text, origin, font, color);
+    }
+
+    hui::Size measureText(std::string_view text, hui::FontHandle font) override {
+        return inner_.measureText(text, font);
+    }
+
+    void drawTextEllipsis(std::string_view text, hui::Point origin, hui::FontHandle font,
+                          hui::Color color, int maxWidth) override {
+        inner_.drawTextEllipsis(text, origin, font, color, maxWidth);
+    }
+
+    hui::TextureHandle loadTexture(std::string_view path) override { return inner_.loadTexture(path); }
+    void freeTexture(hui::TextureHandle h) override { inner_.freeTexture(h); }
+    hui::Size textureSize(hui::TextureHandle h) override { return inner_.textureSize(h); }
+    void drawTexture(hui::TextureHandle h, hui::Rect dst, uint8_t alpha = 255) override {
+        inner_.drawTexture(h, dst, alpha);
+    }
+    void setGlobalAlpha(uint8_t alpha) override { inner_.setGlobalAlpha(alpha); }
+    hui::Size screenSize() const override { return inner_.screenSize(); }
+    void invalidateTextCache() override { inner_.invalidateTextCache(); }
+
+private:
+    hui::IRenderer& inner_;
+    std::unordered_set<std::string> seenDrawKeys_;
+};
+
+static void drawParagraph(hui::IRenderer& r, const hui::Theme& theme, int x, int y, int maxW,
+                          std::string_view text, hui::Color color) {
+    std::istringstream stream{std::string(text)};
+    std::string line;
+    int lineH = 16;
+    while (std::getline(stream, line)) {
+        r.drawText(line, {x, y}, theme.fontSmall, color);
+        y += lineH;
+        (void)maxW;
+    }
+}
+
+static void drawBackHint(hui::IRenderer& r, const hui::Theme& theme, hui::Rect bounds) {
+    r.drawText("B: Back to menu", {bounds.x + 12, bounds.y + bounds.h - 22}, theme.fontSmall,
+               theme.textSecondary);
+}
+
+static void pushGuideOverlay(bool animationsEnabled) {
+    if (!g_viewStack) {
+        return;
+    }
+    auto guide = std::make_unique<hui::GuideOverlayView>(*g_viewStack, animationsEnabled);
+    guide->setOnEqualizer([]() {
+        if (g_toast) {
+            g_toast->show("Equalizer activated", 2.0f);
+        }
+    });
+    guide->setOnSettings([]() {
+        if (g_toast) {
+            g_toast->show("Settings activated", 2.0f);
+        }
+    });
+    guide->setOnClose([]() {
+        if (g_toast) {
+            g_toast->show("Guide closed", 1.5f);
+        }
+    });
+    g_viewStack->push(std::move(guide));
+}
+
+class GuideNavQATestView : public hui::View {
+public:
+    HUI_VIEW_TYPE(GuideNavQATestView)
+
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        openBounds_ = {bounds_.x + 12, bounds_.y + bounds_.h - 64, bounds_.w - 24, 36};
+    }
+
+    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
+        r.fillRect(bounds_, theme.background);
+        r.drawText("Guide Overlay — Nav & Sliders", {bounds_.x + 12, bounds_.y + 8}, theme.fontBody,
+                   theme.accent);
+        drawParagraph(
+            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
+            "Open the guide. Verify:\n"
+            "• Up/Down traverses 2 sliders + 3 action items as one list\n"
+            "• Left/Right on a slider adjusts value by 5\n"
+            "• Left/Right on an action item does nothing (no focus move)",
+            theme.textSecondary);
+
+        bool focused = actionFocused_;
+        r.fillRect(openBounds_, focused ? theme.focusFillColor : theme.surface);
+        r.drawRect(openBounds_, focused ? theme.focusBorderColor : theme.surfaceAlt,
+                   focused ? theme.focusBorderWidth : 1);
+        r.drawText("Open Guide Overlay (A)", {openBounds_.x + 14, openBounds_.y + 10},
+                   theme.fontSmall, focused ? theme.textPrimary : theme.textSecondary);
+        drawBackHint(r, theme, bounds_);
+    }
+
+    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
+        if (b == hui::Button::B) {
+            if (g_viewStack) {
+                g_viewStack->pop();
+            }
+            return true;
+        }
+        if (b == hui::Button::A) {
+            if (actionFocused_) {
+                pushGuideOverlay(true);
+            }
+            return true;
+        }
+        return false;
+    }
+
+    std::vector<hui::HintEntry> currentHints() const override {
+        return {{"A", "Open Guide", false, 1}, {"B", "Back", false, 10}};
+    }
+
+private:
+    hui::Rect openBounds_{0, 0, 0, 0};
+    bool actionFocused_ = true;
+};
+
+class GuideAnimQATestView : public hui::View {
+public:
+    HUI_VIEW_TYPE(GuideAnimQATestView)
+
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        int y = bounds_.y + bounds_.h - 110;
+        animatedBounds_ = {bounds_.x + 12, y, bounds_.w - 24, 36};
+        instantBounds_ = {bounds_.x + 12, y + 42, bounds_.w - 24, 36};
+    }
+
+    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
+        r.fillRect(bounds_, theme.background);
+        r.drawText("Guide Overlay — Slide Animation", {bounds_.x + 12, bounds_.y + 8},
+                   theme.fontBody, theme.accent);
+        drawParagraph(
+            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
+            "SDL2: animated open should slide in from the right.\n"
+            "Instant open should appear with zero slide offset (no tween frames).",
+            theme.textSecondary);
+
+        auto drawBtn = [&](const hui::Rect& rect, bool sel, const char* label) {
+            r.fillRect(rect, sel ? theme.focusFillColor : theme.surface);
+            r.drawRect(rect, sel ? theme.focusBorderColor : theme.surfaceAlt,
+                       sel ? theme.focusBorderWidth : 1);
+            r.drawText(label, {rect.x + 14, rect.y + 10}, theme.fontSmall,
+                       sel ? theme.textPrimary : theme.textSecondary);
+        };
+        drawBtn(animatedBounds_, focusIndex_ == 0, "Open with slide animation (SDL2)");
+        drawBtn(instantBounds_, focusIndex_ == 1, "Open instant (animations disabled)");
+        drawBackHint(r, theme, bounds_);
+    }
+
+    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
+        if (b == hui::Button::Up && focusIndex_ > 0) {
+            --focusIndex_;
+            return true;
+        }
+        if (b == hui::Button::Down && focusIndex_ < 1) {
+            ++focusIndex_;
+            return true;
+        }
+        if (b == hui::Button::B) {
+            if (g_viewStack) {
+                g_viewStack->pop();
+            }
+            return true;
+        }
+        if (b == hui::Button::A && g_viewStack) {
+            pushGuideOverlay(focusIndex_ == 0);
+            return true;
+        }
+        return false;
+    }
+
+    std::vector<hui::HintEntry> currentHints() const override {
+        return {{"A", "Open Guide", false, 1}, {"B", "Back", false, 10}};
+    }
+
+private:
+    hui::Rect animatedBounds_{0, 0, 0, 0};
+    hui::Rect instantBounds_{0, 0, 0, 0};
+    int focusIndex_ = 0;
+};
+
+class ListWindowQATestView : public hui::View {
+public:
+    HUI_VIEW_TYPE(ListWindowQATestView)
+
+    ListWindowQATestView() : source_(5000) {
+        list_.setSource(&source_);
+        list_.layout({0, 0, 200, 200});
+    }
+
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        list_.layout({bounds_.x + 10, bounds_.y + 130, bounds_.w - 20, bounds_.h - 160});
+    }
+
+    void update(float, hui::FocusManager& fm) override {
+        if (fm.focused() != &list_) {
+            fm.setFocus(&list_);
+        }
+    }
+
+    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
+        r.fillRect(bounds_, theme.background);
+        r.drawText("ListView — 5,000 Row Windowing", {bounds_.x + 12, bounds_.y + 8}, theme.fontBody,
+                   theme.accent);
+        drawParagraph(
+            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
+            "Scroll with Up/Down. Each frame should draw at most pageRows+2 rows\n"
+            "and use exactly one pushClip/popClip pair for the list body.",
+            theme.textSecondary);
+
+        source_.resetRowAtCounter();
+        RendererProbe probe(r);
+        probe.resetFrameCounters();
+        list_.draw(probe, theme);
+
+        lastRowDraws_ = source_.rowAtCalls();
+        lastPushClip_ = probe.pushClipCount;
+        lastPopClip_ = probe.popClipCount;
+        const int maxRows = list_.pageRows() + 2;
+        pass_ = (lastRowDraws_ <= maxRows && lastPushClip_ == 1 && lastPopClip_ == 1);
+
+        std::ostringstream stats;
+        stats << "pageRows=" << list_.pageRows()
+              << "  row draws=" << lastRowDraws_ << " (max " << maxRows << ")"
+              << "  clip=" << lastPushClip_ << "/" << lastPopClip_
+              << "  => " << (pass_ ? "PASS" : "CHECK");
+        r.drawText(stats.str(), {bounds_.x + 12, bounds_.y + 108}, theme.fontSmall,
+                   pass_ ? theme.success : theme.warning);
+
+        drawBackHint(r, theme, bounds_);
+    }
+
+    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
+        if (b == hui::Button::B) {
+            if (g_viewStack) {
+                g_viewStack->pop();
+            }
+            return true;
+        }
+        return list_.onButtonDown(b);
+    }
+
+    std::vector<hui::HintEntry> currentHints() const override {
+        return {{"Up/Down", "Scroll List", false, 2}, {"B", "Back", false, 10}};
+    }
+
+private:
+    CountingListSource source_;
+    hui::ListView list_{40};
+    int lastRowDraws_ = 0;
+    int lastPushClip_ = 0;
+    int lastPopClip_ = 0;
+    bool pass_ = false;
+};
+
+class ListCacheQATestView : public hui::View {
+public:
+    HUI_VIEW_TYPE(ListCacheQATestView)
+
+    ListCacheQATestView() : source_(5000) {
+        list_.setSource(&source_);
+    }
+
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        startBounds_ = {bounds_.x + 12, bounds_.y + bounds_.h - 64, bounds_.w - 24, 36};
+        list_.layout({bounds_.x + 10, bounds_.y + 130, bounds_.w - 20, bounds_.h - 160});
+    }
+
+    void update(float dt, hui::FocusManager& fm) override {
+        if (!running_ && fm.focused() != &list_) {
+            fm.setFocus(&list_);
+        }
+        if (!running_) {
+            return;
+        }
+
+        scrollTime_ += dt;
+        list_.onButtonDown(hui::Button::Down);
+
+        if (scrollTime_ >= 5.0f) {
+            running_ = false;
+            finished_ = true;
+        }
+    }
+
+    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
+        r.fillRect(bounds_, theme.background);
+        r.drawText("ListView — Scroll Text Cache (5 s)", {bounds_.x + 12, bounds_.y + 8},
+                   theme.fontBody, theme.accent);
+        drawParagraph(
+            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
+            "Press A to auto-scroll for 5 s. drawText cache hit rate should stay high\n"
+            "(near-zero means cache is keyed on position, not content).",
+            theme.textSecondary);
+
+        if (running_ || finished_) {
+            std::ostringstream line;
+            const float hitRate = (drawTextCalls_ > 0)
+                ? (100.0f * static_cast<float>(drawTextCacheHits_) /
+                   static_cast<float>(drawTextCalls_))
+                : 0.0f;
+            line << "Elapsed: " << static_cast<int>(scrollTime_) << "s / 5s"
+                 << "  drawText hits: " << drawTextCacheHits_ << " / " << drawTextCalls_
+                 << " (" << static_cast<int>(hitRate) << "%)";
+            r.drawText(line.str(), {bounds_.x + 12, bounds_.y + 108}, theme.fontSmall,
+                       theme.textPrimary);
+            if (finished_) {
+                const bool pass = hitRate >= 50.0f;
+                r.drawText(pass ? "PASS — cache hit rate healthy" : "CHECK — hit rate low",
+                           {bounds_.x + 12, bounds_.y + 124}, theme.fontSmall,
+                           pass ? theme.success : theme.warning);
+            }
+        }
+
+        if (running_ || finished_) {
+            if (!probe_) {
+                probe_ = std::make_unique<RendererProbe>(r);
+            }
+            list_.draw(*probe_, theme);
+            drawTextCalls_ = probe_->drawTextCalls;
+            drawTextCacheHits_ = probe_->drawTextCacheHits;
+        } else {
+            list_.draw(r, theme);
+        }
+
+        if (!running_) {
+            bool focused = !finished_;
+            r.fillRect(startBounds_, focused ? theme.focusFillColor : theme.surface);
+            r.drawRect(startBounds_, focused ? theme.focusBorderColor : theme.surfaceAlt,
+                       focused ? theme.focusBorderWidth : 1);
+            r.drawText(finished_ ? "Test complete — B to go back" : "Start 5 s scroll test (A)",
+                       {startBounds_.x + 14, startBounds_.y + 10}, theme.fontSmall,
+                       focused ? theme.textPrimary : theme.textSecondary);
+        }
+        drawBackHint(r, theme, bounds_);
+    }
+
+    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
+        if (b == hui::Button::B) {
+            if (g_viewStack) {
+                g_viewStack->pop();
+            }
+            return true;
+        }
+        if (b == hui::Button::A && !running_ && !finished_) {
+            probe_.reset();
+            drawTextCalls_ = 0;
+            drawTextCacheHits_ = 0;
+            scrollTime_ = 0.0f;
+            running_ = true;
+            return true;
+        }
+        if (!running_) {
+            return list_.onButtonDown(b);
+        }
+        return true;
+    }
+
+    std::vector<hui::HintEntry> currentHints() const override {
+        return {{"A", "Start Test", false, 1}, {"B", "Back", false, 10}};
+    }
+
+private:
+    CountingListSource source_;
+    hui::ListView list_{40};
+    std::unique_ptr<RendererProbe> probe_;
+    int drawTextCalls_ = 0;
+    int drawTextCacheHits_ = 0;
+    hui::Rect startBounds_{0, 0, 0, 0};
+    float scrollTime_ = 0.0f;
+    bool running_ = false;
+    bool finished_ = false;
+};
+
+class ListShortQATestView : public hui::View {
+public:
+    HUI_VIEW_TYPE(ListShortQATestView)
+
+    ListShortQATestView() : source_(3) {
+        list_.setSource(&source_);
+    }
+
+    void layout(hui::Rect contentRect) override {
+        bounds_ = contentRect;
+        list_.layout({bounds_.x + 10, bounds_.y + 120, bounds_.w - 20, bounds_.h - 150});
+    }
+
+    void update(float, hui::FocusManager& fm) override {
+        if (fm.focused() != &list_) {
+            fm.setFocus(&list_);
+        }
+    }
+
+    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
+        r.fillRect(bounds_, theme.background);
+        r.drawText("ListView — Short List scrollOffset", {bounds_.x + 12, bounds_.y + 8},
+                   theme.fontBody, theme.accent);
+        drawParagraph(
+            r, theme, bounds_.x + 12, bounds_.y + 34, bounds_.w - 24,
+            "Only 3 items in a tall viewport. scrollOffset must stay 0 when navigating.\n"
+            "Wrap Up/Down — offset should remain 0 (no UB clamp issues).",
+            theme.textSecondary);
+
+        const int offset = list_.scrollOffset();
+        const bool pass = (offset == 0);
+        std::ostringstream stats;
+        stats << "scrollOffset=" << offset << "  focus=" << list_.getFocusIndex()
+              << "  => " << (pass ? "PASS" : "FAIL");
+        r.drawText(stats.str(), {bounds_.x + 12, bounds_.y + 100}, theme.fontSmall,
+                   pass ? theme.success : theme.warning);
+
+        list_.draw(r, theme);
+        drawBackHint(r, theme, bounds_);
+    }
+
+    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
+        if (b == hui::Button::B) {
+            if (g_viewStack) {
+                g_viewStack->pop();
+            }
+            return true;
+        }
+        return list_.onButtonDown(b);
+    }
+
+    std::vector<hui::HintEntry> currentHints() const override {
+        return {{"Up/Down", "Navigate / Wrap", false, 2}, {"B", "Back", false, 10}};
+    }
+
+private:
+    CountingListSource source_;
+    hui::ListView list_{40};
+};
+
+class Phase12QAMenuView : public hui::View {
+public:
+    HUI_VIEW_TYPE(Phase12QAMenuView)
+
+    Phase12QAMenuView() {
+        items_ = {
+            "Guide Overlay — Nav & Sliders",
+            "Guide Overlay — Slide Animation",
+            "ListView — 5,000 Row Windowing",
+            "ListView — Scroll Text Cache (5 s)",
+            "ListView — Short List scrollOffset",
+        };
+    }
+
+    void layout(hui::Rect contentRect) override { bounds_ = contentRect; }
+
+    void draw(hui::IRenderer& r, const hui::Theme& theme) override {
+        r.fillRect(bounds_, theme.background);
+        r.drawText("Phase 12 QA — Manual Tests", {bounds_.x + 12, bounds_.y + 8}, theme.fontBody,
+                   theme.accent);
+        drawParagraph(r, theme, bounds_.x + 12, bounds_.y + 30, bounds_.w - 24,
+                      "Remaining sign-off items. Select a test, follow on-screen instructions.",
+                      theme.textSecondary);
+
+        int y = bounds_.y + 72;
+        for (int i = 0; i < static_cast<int>(items_.size()); ++i) {
+            bool focused = (i == focusIndex_);
+            hui::Rect row{bounds_.x + 10, y, bounds_.w - 20, 30};
+            r.fillRect(row, focused ? theme.focusFillColor : theme.surface);
+            if (focused) {
+                r.drawRect(row, theme.focusBorderColor, theme.focusBorderWidth);
+            }
+            r.drawText(items_[i], {row.x + 10, row.y + 7}, theme.fontSmall,
+                       focused ? theme.textPrimary : theme.textSecondary);
+            y += 34;
+        }
+        drawBackHint(r, theme, bounds_);
+    }
+
+    bool onButtonDown(hui::Button b, hui::FocusManager&) override {
+        if (b == hui::Button::Up && focusIndex_ > 0) {
+            --focusIndex_;
+            return true;
+        }
+        if (b == hui::Button::Down &&
+            focusIndex_ < static_cast<int>(items_.size()) - 1) {
+            ++focusIndex_;
+            return true;
+        }
+        if (b == hui::Button::B) {
+            if (g_viewStack) {
+                g_viewStack->pop();
+            }
+            return true;
+        }
+        if (b == hui::Button::A && g_viewStack) {
+            switch (focusIndex_) {
+                case 0:
+                    g_viewStack->push(std::make_unique<GuideNavQATestView>());
+                    break;
+                case 1:
+                    g_viewStack->push(std::make_unique<GuideAnimQATestView>());
+                    break;
+                case 2:
+                    g_viewStack->push(std::make_unique<ListWindowQATestView>());
+                    break;
+                case 3:
+                    g_viewStack->push(std::make_unique<ListCacheQATestView>());
+                    break;
+                case 4:
+                    g_viewStack->push(std::make_unique<ListShortQATestView>());
+                    break;
+            }
+            return true;
+        }
+        return false;
+    }
+
+    std::vector<hui::HintEntry> currentHints() const override {
+        return {{"A", "Run Test", false, 1}, {"B", "Back", false, 10}};
+    }
+
+private:
+    std::vector<std::string> items_;
+    int focusIndex_ = 0;
+};
+
+// ---------------------------------------------------------------------------
 // Interactive Main Showcase View
 // ---------------------------------------------------------------------------
 class MoleculeShowcaseView : public hui::View {
@@ -133,12 +756,10 @@ public:
     HUI_VIEW_TYPE(MoleculeShowcaseView)
 
     MoleculeShowcaseView() {
-        // Setup ListHeaderWidget
         listHeader_.setLabel("/home/user/music/rock/progressive/dream_theater/scenes_from_a_memory/05_strange_deja_vu.flac");
         listHeader_.setItemCount(12);
         listHeader_.setSortBadge("Track #");
 
-        // Setup SeekableProgressBar
         seekableProgress_.setTime(145.0f, 312.0f);
         seekableProgress_.setProgress(145.0f / 312.0f);
         seekableProgress_.setOnSeek([this](int direction) {
@@ -150,7 +771,6 @@ public:
             }
         });
 
-        // Setup Volume Slider
         volumeSlider_.setLabel("Master Volume");
         volumeSlider_.setRange(0, 100, 5);
         volumeSlider_.setValue(75);
@@ -160,7 +780,6 @@ public:
             }
         });
 
-        // Setup PlaybackControlsRow
         playbackControls_.setPlaybackState(playbackState_);
         playbackControls_.setShuffle(true);
         playbackControls_.setRepeatMode(hui::RepeatMode::All);
@@ -189,14 +808,15 @@ public:
             }
         });
 
-        // Setup Sort indicator
         sortIndicator_.setMode("Track #");
 
-        // Setup Grid Stamps
         gridCell1_.setCell("Metropolis Pt. 2", "1999", 0, false, false);
         gridCell2_.setCell("Images and Words", "1992", 0, true, false);
         gridCell3_.setCell("Octavarium", "2005", 0, false, false);
     }
+
+    void onSuspend() override { inputSuspended_ = true; }
+    void onResume() override { inputSuspended_ = false; }
 
     void layout(hui::Rect contentRect) override {
         bounds_ = contentRect;
@@ -220,9 +840,11 @@ public:
         sortIndicator_.layout({playbackRowBounds_.x + playbackRowBounds_.w - 100, playbackRowBounds_.y + 6, 90, 24});
         y += 42;
 
-        // 5. Toast Trigger & Modal Trigger action buttons
+        // 5. Toast Trigger, Modal Trigger, and Phase 12 QA action buttons
         toastActionBounds_ = {bounds_.x + 10, y, (bounds_.w - 26) / 2, 32};
         modalActionBounds_ = {bounds_.x + 16 + (bounds_.w - 26) / 2, y, (bounds_.w - 26) / 2, 32};
+        y += 38;
+        qaActionBounds_ = {bounds_.x + 10, y, bounds_.w - 20, 32};
         y += 38;
 
         // 6. Stamp Previews (List Items & Grid Cells)
@@ -231,6 +853,9 @@ public:
 
     void update(float dt, hui::FocusManager& fm) override {
         (void)dt;
+        if (inputSuspended_) {
+            return;
+        }
         // Sync focus with focusIndex_
         if (focusIndex_ == 0 && fm.focused() != &seekableProgress_) {
             fm.setFocus(&seekableProgress_);
@@ -271,6 +896,11 @@ public:
         r.drawRect(modalActionBounds_, isModalFocused ? theme.focusBorderColor : theme.surfaceAlt, isModalFocused ? theme.focusBorderWidth : 1);
         r.drawText("Open Modal Overlay (Press A)", {modalActionBounds_.x + 14, modalActionBounds_.y + 8}, theme.fontSmall, isModalFocused ? theme.textPrimary : theme.textSecondary);
 
+        bool isQaFocused = (focusIndex_ == 5);
+        r.fillRect(qaActionBounds_, isQaFocused ? theme.focusFillColor : theme.surface);
+        r.drawRect(qaActionBounds_, isQaFocused ? theme.focusBorderColor : theme.surfaceAlt, isQaFocused ? theme.focusBorderWidth : 1);
+        r.drawText("Phase 12 QA Tests (Press A)", {qaActionBounds_.x + 14, qaActionBounds_.y + 8}, theme.fontSmall, isQaFocused ? theme.textPrimary : theme.textSecondary);
+
         // 6. Section Separator & Stamp Previews
         int stampY = stampSectionY_;
         r.drawText("Level 1 Atoms Stamps (ListItemWidget & GridCellWidget)", {bounds_.x + 12, stampY}, theme.fontSmall, theme.accent);
@@ -310,7 +940,7 @@ public:
             return true;
         }
         if (b == hui::Button::Down) {
-            if (focusIndex_ < 4) {
+            if (focusIndex_ < 5) {
                 ++focusIndex_;
             }
             return true;
@@ -341,6 +971,12 @@ public:
                 }
                 return true;
             }
+            if (focusIndex_ == 5) {
+                if (g_viewStack) {
+                    g_viewStack->push(std::make_unique<Phase12QAMenuView>());
+                }
+                return true;
+            }
         }
 
         if (b == hui::Button::B) {
@@ -362,6 +998,7 @@ public:
     }
 
 private:
+    bool inputSuspended_ = false;
     int focusIndex_ = 0;
     float currentTime_ = 145.0f;
     float totalTime_ = 312.0f;
@@ -382,6 +1019,7 @@ private:
     hui::Rect playbackRowBounds_{0, 0, 0, 0};
     hui::Rect toastActionBounds_{0, 0, 0, 0};
     hui::Rect modalActionBounds_{0, 0, 0, 0};
+    hui::Rect qaActionBounds_{0, 0, 0, 0};
     int stampSectionY_ = 0;
 };
 
@@ -417,7 +1055,7 @@ int main(int argc, char* argv[]) {
     }
     renderer = std::make_unique<hui::SDL1Renderer>(screen);
 #else
-    SDL_Window* window = SDL_CreateWindow("LHCUI Phase 11 Molecules & Atoms Visual Showcase",
+    SDL_Window* window = SDL_CreateWindow("LHCUI Showcase — Molecules & Phase 12 QA",
                                           SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
                                           screenW, screenH, SDL_WINDOW_SHOWN);
     if (!window) {
@@ -505,10 +1143,10 @@ int main(int argc, char* argv[]) {
     uiSystem.viewStack().push(std::make_unique<example::MoleculeShowcaseView>());
 
     // Show initial welcome toast
-    toast.show("Welcome to LHCUI Phase 11 Showcase!", 3.0f);
+    toast.show("Welcome! Navigate to Phase 12 QA Tests for manual sign-off.", 3.0f);
 
     std::cout << "\n========================================================\n"
-              << "          LHCUI Molecules & Atoms Showcase               \n"
+              << "          LHCUI Showcase (Molecules + Phase 12 QA)       \n"
               << "========================================================\n"
               << " Controls (Keyboard Mapping):\n"
               << "  - Up / Down       : Move focus between interactive rows\n"
@@ -518,6 +1156,8 @@ int main(int argc, char* argv[]) {
               << "  - X / Esc         : Button B (Dismiss modal / Quit)\n"
               << "  - A / C / S / V   : Buttons X and Y\n"
               << "  - Q / E           : Shoulders L1 and R1\n"
+              << "\n"
+              << " Phase 12 manual QA: focus \"Phase 12 QA Tests\" and press A.\n"
               << "========================================================\n\n" << std::flush;
 
     uint64_t lastTime = SDL_GetTicks();

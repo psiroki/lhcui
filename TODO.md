@@ -444,13 +444,13 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 - [x] `ContextMenuView` shows the overlay background fill and the action list; pressing B dismisses it; a destructive action renders in `theme.warning` color
 - [x] `ConfirmationDialogView` opens with focus on Cancel; Left/Right moves focus between Cancel and Confirm; A on Confirm confirms; B cancels from either button
 - [x] `ConfirmationDialogView` Left at Cancel and Right at Confirm do **not** wrap
-- [ ] `GuideOverlayView` Up/Down traverses sliders and action items as one list; Left/Right on a slider adjusts by 5; Left/Right on an action item does nothing and does not move focus
+- [x] `GuideOverlayView` Up/Down traverses sliders and action items as one list; Left/Right on a slider adjusts by 5; Left/Right on an action item does nothing and does not move focus
 - [x] Each overlay draws no full-screen fill of its own: with one modal open, the instrumented renderer sees exactly **one** full-screen `fillRect`
-- [ ] `ListView` with 5,000 rows: the instrumented renderer sees at most `pageRows_ + 2` row draws per frame, and exactly one `pushClip`/`popClip` pair for the list body
-- [ ] `ListView` scrolling continuously for 5 s: the text measurement cache hit rate stays high (instrument it) — a rate near zero means the cache is keyed on position rather than content (§13.1)
-- [ ] `ListView` with a list shorter than the viewport: `scrollOffset_` stays 0 and no undefined-behaviour clamp occurs (build with UBSan)
+- [x] `ListView` with 5,000 rows: the instrumented renderer sees at most `pageRows_ + 2` row draws per frame, and exactly one `pushClip`/`popClip` pair for the list body
+- [x] `ListView` scrolling continuously for 5 s: the text measurement cache hit rate stays high (instrument it) — a rate near zero means the cache is keyed on position rather than content (§13.1)
+- [x] `ListView` with a list shorter than the viewport: `scrollOffset_` stays 0 and no undefined-behaviour clamp occurs (build with UBSan)
 - [x] `ListView` insert-while-suspended: focus index 7, insert a row at index 3, `notifyRowsChanged()` — focus stays at index 7 (now a different row) and nothing crashes; `setFocusIndex(3)` then highlights the inserted row
-- [ ] `GuideOverlayView` slides in from the right under SDL2; with `setAnimationsEnabled(false)` it appears instantly with no intermediate animation frames
+- [x] `GuideOverlayView` slides in from the right under SDL2; with `setAnimationsEnabled(false)` it appears instantly with no intermediate animation frames
 - [x] `OnScreenKeyboard` Backspace deletes the last typed character; Confirm calls `onCommit` with the full typed string; Cancel calls `onCancel` without modifying the string
 
 ---

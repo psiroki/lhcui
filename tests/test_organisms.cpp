@@ -575,6 +575,46 @@ TEST_SUITE("Phase 12 - Organisms") {
         CHECK(guidePtr->slideOffset() == doctest::Approx(0.0f));
     }
 
+    TEST_CASE("GuideOverlayView reclaims focus and action Right is no-op") {
+        FocusManager fm;
+        ViewStack stack(&fm);
+        stack.setContentRect({0, 0, 640, 480});
+
+        class FocusStealerView : public View {
+        public:
+            void update(float, FocusManager& fm) override {
+                if (fm.focused() != &slider_) {
+                    fm.setFocus(&slider_);
+                }
+            }
+            void draw(IRenderer&, const Theme&) override {}
+        private:
+            Slider slider_{0, 100, 50};
+        };
+
+        stack.push(std::make_unique<FocusStealerView>());
+        stack.applyPendingMutations(fm);
+
+        auto guide = std::make_unique<GuideOverlayView>(stack, false);
+        GuideOverlayView* guidePtr = guide.get();
+        stack.push(std::move(guide));
+        stack.applyPendingMutations(fm);
+        guidePtr->layout({360, 0, 280, 480});
+
+        guidePtr->onButtonDown(Button::Down, fm);
+        guidePtr->onButtonDown(Button::Down, fm);
+        guidePtr->onButtonDown(Button::Down, fm);
+        guidePtr->update(0.016f, fm);
+
+        const int volumeBefore = guidePtr->masterVolumeSlider().value();
+        CHECK(guidePtr->onButtonDown(Button::Right, fm));
+        guidePtr->update(0.016f, fm);
+        CHECK(guidePtr->masterVolumeSlider().value() == volumeBefore);
+        CHECK(guidePtr->onButtonDown(Button::Right, fm));
+        guidePtr->update(0.016f, fm);
+        CHECK(guidePtr->masterVolumeSlider().value() == volumeBefore);
+    }
+
     TEST_CASE("OnScreenKeyboard backspace commit and cancel") {
         OnScreenKeyboard keyboard;
         keyboard.layout({0, 0, 400, 240});
