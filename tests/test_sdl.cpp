@@ -237,7 +237,11 @@ TEST_CASE("SDLGamepadHelper - button and axis translation with hysteresis") {
 
 #ifdef HUI_ENABLE_KEYBOARD_FALLBACK
 TEST_CASE("KeyboardFallback - translates desktop keyboard keys") {
+#ifdef HUI_USE_SDL1
+    auto testKey = [](SDLKey sym, hui::Button expected) {
+#else
     auto testKey = [](SDL_Keycode sym, hui::Button expected) {
+#endif
         SDL_Event e{};
         e.type = SDL_KEYDOWN;
         e.key.keysym.sym = sym;

@@ -973,7 +973,11 @@ int main(int argc, char* argv[]) {
     }
     if (selfTest) {
         // No window server needed, so this runs in CI and under sanitizers.
+#ifdef HUI_USE_SDL1
+        setenv("SDL_VIDEODRIVER", "dummy", 1);
+#else
         SDL_SetHint(SDL_HINT_VIDEODRIVER, "dummy");
+#endif
     }
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_JOYSTICK) < 0) {
@@ -1013,6 +1017,10 @@ int main(int argc, char* argv[]) {
     }
     SDL_Renderer* sdlRenderer = SDL_CreateRenderer(window, -1,
                                                    SDL_RENDERER_ACCELERATED | SDL_RENDERER_PRESENTVSYNC);
+    if (!sdlRenderer && selfTest) {
+        // Dummy video driver has no GPU; fall back to software for headless self-test.
+        sdlRenderer = SDL_CreateRenderer(window, -1, SDL_RENDERER_SOFTWARE);
+    }
     if (!sdlRenderer) {
         std::cerr << "SDL_CreateRenderer failed: " << SDL_GetError() << "\n";
         SDL_DestroyWindow(window);

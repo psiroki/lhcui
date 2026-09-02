@@ -504,9 +504,9 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 - [x] Verify `LibraryView` and `NowPlayingView` are reachable via navigation
   - [x] `NowPlayingView` via track activation and via Select (§9.5); `LibraryView` via the browser context menu
 - [x] Global accelerators: `UISystem::setGlobalAccelerator()` for Start / Select / Guide / B, suppressed while an overlay is on top (§9.3, §9.5)
-- [ ] Confirm the example builds and runs correctly under both SDL1 and SDL2 backends
+- [x] Confirm the example builds and runs correctly under both SDL1 and SDL2 backends
   - [x] SDL2 — builds clean under `-Wall -Wextra`, runs, self-test green
-  - [ ] SDL1 — deferred to a Linux host; macOS has no SDL1 (see `AGENTS.md`)
+  - [x] SDL1 — builds and runs on Linux; self-test green, ASan/UBSan clean
 
 ### ✅ QA Sign-off — Phase 14
 
@@ -518,8 +518,11 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 
 - [ ] Example builds and runs with `-DHUI_USE_SDL1=OFF` (SDL2 mode); no runtime errors or visual corruption
   - [x] Builds and runs with no runtime errors (self-test)
+  - [x] ASan/UBSan clean over `hui_tests` and `--selftest` on Linux (108 tests, 887 assertions, 24 self-test steps)
   - [ ] No visual corruption — needs eyes on a real window
 - [ ] Example builds and runs with `-DHUI_USE_SDL1=ON` (SDL1 mode); visually equivalent output to SDL2 for static frames
+  - [x] Builds and runs on Linux; self-test green (108 tests, 884 assertions, 24 self-test steps)
+  - [x] ASan/UBSan clean over `hui_tests` and `--selftest` on Linux
 - [ ] Keyboard fallback build (`HUI_ENABLE_KEYBOARD_FALLBACK=ON`): all three views are fully navigable using keyboard alone; each key in the documented mapping produces the correct action
   - [x] All three views are fully navigable by button input alone (self-test)
   - [ ] Each documented key maps to the right button end-to-end through SDL — needs a keyboard
@@ -530,13 +533,11 @@ Implement each as a concrete `Widget` subclass. Verify each draws correctly in t
 
 #### Pending manual verification
 
-Everything above that stays unchecked needs a human or a Linux box:
+Everything above that stays unchecked needs a human:
 
 - Visual inspection of a real SDL2 window — layout, no corruption, focus rings legible.
-- The SDL1 backend end to end. macOS cannot run it (`AGENTS.md`).
+- Visual inspection of a real SDL1 window — visually equivalent to SDL2 for static frames.
 - Keyboard fallback key-by-key against the documented mapping.
-- ASan/UBSan over `--selftest`. It could not be run on macOS: Homebrew's `sdl2-compat`
-  shadows the real SDL2 and hangs under ASan (see `AGENTS.md`).
 
 ---
 
